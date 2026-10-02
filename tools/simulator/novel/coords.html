@@ -1,0 +1,10 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Novel: The Coordinates</title><link rel="stylesheet" href="../variants/common.css">
+<style>.codes{display:flex;flex-wrap:wrap;gap:10px;max-width:560px;justify-content:center}.codes span{border:1px solid var(--line);border-radius:8px;padding:8px 12px;font:700 20px "Courier New";color:var(--cyan)}</style></head>
+<body><main id="stage"></main><script type="module">
+import { puzzle } from './novel.js';
+puzzle({ code: 'NOVEL · B', title: 'The Coordinates',
+  clue: 'PRACTICE. Each code is a place in the book: page, line, word. Read the transmission.',
+  hint: 'TYPE THE MESSAGE · CONTINUE TO SUBMIT',
+  body: `<div class="codes">${['276-014-013', '280-006-001', '279-015-012', '274-002-006', '279-019-010', '281-008-003'].map(c => `<span>${c}</span>`).join('')}</div>`,
+  fields: ['message'], answers: ['SAVE AS MANY AS YOU CAN'] });
+</script></body></html>

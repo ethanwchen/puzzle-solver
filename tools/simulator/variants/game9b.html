@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>G9 variant B: The Tunnels (rule permutations)</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  #grid { display:grid; gap:4px; }
+  .t { position:relative; width:var(--tile, 62px); height:var(--tile, 62px); font-size:calc(var(--tile, 62px) * .45); background:#1a1113; border:1px solid var(--line); border-radius:6px; display:flex; align-items:center; justify-content:center; font-weight:700; font-family:Georgia; color:#cdbfb3; cursor:pointer; }
+  .t.pipe svg { display:block; }
+  .t.start { box-shadow:0 0 0 3px var(--cyan) inset; color:var(--cyan); }
+  .t.cand { box-shadow:0 0 0 3px var(--cyan) inset; color:var(--cyan); }
+  .t.mark { background:#4a1422; box-shadow:0 0 0 2px var(--red) inset; color:#fff; }
+  .t.lit { box-shadow:0 0 14px 3px rgba(255,214,120,.55) inset; color:#ffe7b0; }
+  .t i { position:absolute; left:4px; top:2px; font:600 11px Arial; font-style:normal; color:#8f7f74; }
+  #keybtn { position:absolute; right:28px; top:60px; z-index:4; }
+  #key { position:absolute; right:28px; top:104px; width:270px; background:#140c0e; border:1px solid var(--line); border-radius:12px; padding:14px; display:none; z-index:6; }
+  #key.on { display:block; }
+  #key h3 { margin:0 0 8px; font:600 12px Arial; letter-spacing:.18em; color:var(--dim); }
+  #key div { display:flex; justify-content:space-between; font:700 20px Georgia; padding:4px 0; }
+  #key span:last-child { font:600 13px Arial; letter-spacing:.12em; color:var(--tan); align-self:center; }
+  #legend { margin-top:14px; font:600 13px Arial; letter-spacing:.1em; color:var(--tan); text-align:center; }
+  #word { margin-top:16px; }
+  #word input { background:#140c0e; border:1px solid var(--line); color:#fff; font:600 18px Arial; letter-spacing:.2em; padding:10px 14px; border-radius:8px; width:320px; text-transform:uppercase; }
+</style>
+</head>
+<body>
+<main id="stage"><div id="grid"></div><div id="legend"></div><div id="word"></div></main>
+<button class="pill" id="keybtn">VIEW KEY</button>
+<div id="key"><h3 id="keyh">KEY</h3><div id="keyrows"></div></div>
+<script type="module">
+// Rule permutations for the tunnels game. URL params (all optional; unspecified = seeded random):
+//   move=dir|diag|jump|turn|pipe   dir: symbol = absolute direction; diag: 8 directions; jump: symbol = direction + 1-2 steps;
+//                                  turn: symbol = turn relative to your heading (start heading UP); pipe: box-drawing pipes
+//   exit=top|left|right|bottom     edge to escape through
+//   starts=1|3                     one marked start, or several marked candidates (only one escapes)
+//   entry=click|word               mark the tiles, or type the word the route's corner letters spell
+//   key=panel|legend|none          key behind a VIEW KEY button, printed under the grid, or not shown (pipes need none)
+//   lit=1                          decoy glowing path;  rows/cols/n size;  seed;  truth=1 exports window.__truth
+import { R, pick, shuffle, sha, $, frame, onSubmit, params } from './common.js';
+const P = k => params.get(k);
+const MOVE = P('move') || pick(['dir', 'diag', 'jump', 'turn', 'pipe']);
+const EXIT = P('exit') || pick(['top', 'top', 'left', 'right']);
+const NSTART = Number(P('starts') || pick([1, 1, 3]));
+const ENTRY = P('entry') || pick(['click', 'word']);
+const KEYMODE = P('key') || (MOVE === 'pipe' ? 'none' : pick(['panel', 'legend']));
+const LIT = P('lit') === '1';
+const NR = Number(P('rows') || P('n')) || pick([5, 6, 7]);
+const NC = Number(P('cols') || P('n')) || NR;
+const V = { UP: [-1, 0], DOWN: [1, 0], LEFT: [0, -1], RIGHT: [0, 1], UPLEFT: [-1, -1], UPRIGHT: [-1, 1], DOWNLEFT: [1, -1], DOWNRIGHT: [1, 1] };
+const HEAD = ['UP', 'RIGHT', 'DOWN', 'LEFT'];
+const SETS = [['◐', '◑', '◒', '◓', '◔', '◕', '●', '○'], ['Ⅰ', 'Ⅱ', 'Ⅲ', 'Ⅳ', 'Ⅴ', 'Ⅵ', 'Ⅶ', 'Ⅷ'], ['♠', '♥', '♦', '♣', '♤', '♡', '♢', '♧'],
+  ['Ψ', 'Ω', 'Δ', 'Σ', 'Φ', 'Λ', 'Π', 'Θ'], ['★', '✦', '✚', '✖', '◆', '▲', '■', '●']];
+const PIPE = { UD: '┃', LR: '━', RD: '┏', LD: '┓', UR: '┗', UL: '┛', UDLR: '╋' };
+const OPP = { U: 'D', D: 'U', L: 'R', R: 'L' };
+const SIDE = { U: [-1, 0], D: [1, 0], L: [0, -1], R: [0, 1] };
+const inb = (r, c) => r >= 0 && r < NR && c >= 0 && c < NC;
+// escape-side geometry: rotate the problem so "forward" points at the exit edge
+const FWD = { top: 'UP', bottom: 'DOWN', left: 'LEFT', right: 'RIGHT' }[EXIT];
+const back = { UP: 'DOWN', DOWN: 'UP', LEFT: 'RIGHT', RIGHT: 'LEFT' }[FWD];
+const sideDirs = FWD === 'UP' || FWD === 'DOWN' ? ['LEFT', 'RIGHT'] : ['UP', 'DOWN'];
+function startCell() { // on the edge opposite the exit
+  if (EXIT === 'top') return [NR - 1, Math.floor(R() * NC)];
+  if (EXIT === 'bottom') return [0, Math.floor(R() * NC)];
+  if (EXIT === 'left') return [Math.floor(R() * NR), NC - 1];
+  return [Math.floor(R() * NR), 0];
+}
+const atExit = (r, c) => (EXIT === 'top' && r === 0) || (EXIT === 'bottom' && r === NR - 1) || (EXIT === 'left' && c === 0) || (EXIT === 'right' && c === NC - 1);
+// random self-avoiding walk to the exit edge; each step = [dirName, count]
+function makeRoute() {
+  for (let t = 0; t < 2000; t++) {
+    let [r, c] = startCell(); const seen = new Set([`${r},${c}`]); const cells = [[r, c]], steps = [];
+    let ok = true, guard = 0;
+    while (!atExit(r, c) && guard++ < 60) {
+      let opts = [[FWD, 3], [sideDirs[0], 1], [sideDirs[1], 1]];
+      if (MOVE === 'diag') opts = opts.concat(FWD === 'UP' ? [['UPLEFT', 2], ['UPRIGHT', 2]] : FWD === 'DOWN' ? [['DOWNLEFT', 2], ['DOWNRIGHT', 2]] : FWD === 'LEFT' ? [['UPLEFT', 2], ['DOWNLEFT', 2]] : [['UPRIGHT', 2], ['DOWNRIGHT', 2]]);
+      const cand = [];
+      for (const [d, w] of opts) for (const n of MOVE === 'jump' ? [1, 2] : [1]) {
+        const nr = r + V[d][0] * n, nc = c + V[d][1] * n;
+        if (inb(nr, nc) && !seen.has(`${nr},${nc}`)) for (let i = 0; i < w; i++) cand.push([d, n]);
+      }
+      if (!cand.length) { ok = false; break; }
+      const [d, n] = pick(cand); r += V[d][0] * n; c += V[d][1] * n; seen.add(`${r},${c}`); cells.push([r, c]); steps.push([d, n]);
+    }
+    if (ok && atExit(r, c) && cells.length >= Math.min(NR, NC) && cells.length <= NR * NC / 2) { steps.push([FWD, 1]); return { cells, steps }; }
+  }
+  throw new Error('no route');
+}
+const route = makeRoute();
+const onRoute = new Set(route.cells.map(([r, c]) => `${r},${c}`));
+// ---- symbols per rule
+let syms, mapping = {}, keyTitle = 'KEY · FOLLOW THE SYMBOL';
+const grid = Array.from({ length: NR }, () => Array(NC).fill(''));
+if (MOVE === 'pipe') {
+  // enter the start from the far side, leave toward the next cell
+  const sideOf = (a, b) => b[0] < a[0] ? 'U' : b[0] > a[0] ? 'D' : b[1] < a[1] ? 'L' : 'R';
+  const entry0 = { top: 'D', bottom: 'U', left: 'R', right: 'L' }[EXIT];
+  const outFinal = { top: 'U', bottom: 'D', left: 'L', right: 'R' }[EXIT];
+  route.cells.forEach((cell, k) => {
+    const inn = k === 0 ? entry0 : OPP[sideOf(route.cells[k - 1], cell)];
+    const out = k + 1 < route.cells.length ? sideOf(cell, route.cells[k + 1]) : outFinal;
+    const key = ['U', 'R', 'D', 'L'].filter(s => s === inn || s === out);
+    const name = { 'U,D': 'UD', 'R,L': 'LR', 'R,D': 'RD', 'D,L': 'LD', 'U,R': 'UR', 'U,L': 'UL' }[key.join(',')];
+    grid[cell[0]][cell[1]] = PIPE[name];
+  });
+  const fillers = Object.values(PIPE);
+  for (let r = 0; r < NR; r++) for (let c = 0; c < NC; c++) if (!grid[r][c]) grid[r][c] = pick(fillers);
+  syms = fillers; keyTitle = 'PIPES CONNECT';
+} else if (MOVE === 'turn') {
+  syms = pick(SETS).slice(0, 3);
+  shuffle(['STRAIGHT', 'LEFT', 'RIGHT']).forEach((d, i) => { mapping[syms[i]] = d; });
+  const symFor = d => Object.keys(mapping).find(s => mapping[s] === d);
+  let h = HEAD.indexOf(FWD);
+  route.steps.forEach(([d], k) => {
+    const want = HEAD.indexOf(d); const turn = (want - h + 4) % 4;
+    const [r, c] = route.cells[k];
+    if (turn === 2) throw new Error('u-turn'); // never generated: backward moves are excluded
+    grid[r][c] = symFor(turn === 0 ? 'STRAIGHT' : turn === 1 ? 'RIGHT' : 'LEFT'); h = want;
+  });
+  keyTitle = `KEY · TURN, THEN STEP (YOU START FACING ${FWD})`;
+} else {
+  const dirs = MOVE === 'diag' ? Object.keys(V) : ['UP', 'DOWN', 'LEFT', 'RIGHT'];
+  const moves = MOVE === 'jump' ? dirs.flatMap(d => [d, d + '2']) : dirs;
+  syms = pick(SETS).slice(0, moves.length);
+  shuffle(moves).forEach((m, i) => { mapping[syms[i]] = m; });
+  const symFor = m => Object.keys(mapping).find(s => mapping[s] === m);
+  route.steps.forEach(([d, n], k) => { const [r, c] = route.cells[k]; grid[r][c] = symFor(n === 2 ? d + '2' : d); });
+  if (MOVE === 'jump') keyTitle = 'KEY · 2 = JUMP TWO TILES';
+}
+if (MOVE !== 'pipe') for (let r = 0; r < NR; r++) for (let c = 0; c < NC; c++) if (!onRoute.has(`${r},${c}`)) grid[r][c] = pick(syms);
+const start = route.cells[0];
+function escapes([r, c]) { // does a walk from (r,c) under this rule leave through the exit edge?
+  const seen = new Set(); let h = HEAD.indexOf(FWD), came = { top: 'D', bottom: 'U', left: 'R', right: 'L' }[EXIT];
+  for (let i = 0; i < 400; i++) {
+    const st = `${r},${c},${h},${came}`; if (seen.has(st)) return false; seen.add(st);
+    const sym = grid[r][c]; let dr, dc, n = 1;
+    if (MOVE === 'pipe') {
+      const o = Object.entries(PIPE).find(([, v]) => v === sym)[0];
+      if (!o.includes(came)) return false;
+      const outs = [...o].filter(x => x !== came); const go = outs.includes(OPP[came]) ? OPP[came] : outs.length === 1 ? outs[0] : null;
+      if (!go) return false; [dr, dc] = SIDE[go]; came = OPP[go];
+    } else if (MOVE === 'turn') {
+      h = (h + { STRAIGHT: 0, RIGHT: 1, LEFT: 3 }[mapping[sym]]) % 4; [dr, dc] = V[HEAD[h]];
+    } else { const m = mapping[sym]; n = m.endsWith('2') ? 2 : 1; [dr, dc] = V[m.replace('2', '')]; }
+    const nr = r + dr * n, nc = c + dc * n;
+    if (!inb(nr, nc)) return (EXIT === 'top' && nr < 0) || (EXIT === 'bottom' && nr >= NR) || (EXIT === 'left' && nc < 0) || (EXIT === 'right' && nc >= NC);
+    r = nr; c = nc;
+  }
+  return false;
+}
+// decoy starts: other cells on the start edge whose walk does NOT escape (checked by the solver, not here)
+const starts = [start];
+if (NSTART > 1) {
+  const edge = [];
+  for (let r = 0; r < NR; r++) for (let c = 0; c < NC; c++) {
+    const e = (EXIT === 'top' && r === NR - 1) || (EXIT === 'bottom' && r === 0) || (EXIT === 'left' && c === NC - 1) || (EXIT === 'right' && c === 0);
+    if (e && !onRoute.has(`${r},${c}`)) edge.push([r, c]);
+  }
+  shuffle(edge);
+  for (const e of edge) { if (starts.length >= NSTART) break; if (!escapes(e)) starts.push(e); }
+}
+// ---- decoy lit path
+const litCells = new Set();
+if (LIT) { for (let r = 0; r < NR; r++) for (let c = 0; c < NC; c++) if (!onRoute.has(`${r},${c}`) && (FWD === 'UP' || FWD === 'DOWN' ? c === start[1] : r === start[0])) litCells.add(`${r},${c}`); }
+// ---- letters for word entry: route letters spell a word, others random
+const WORDS = ['SURVIVE', 'ESCAPE', 'TUNNEL', 'MINERS', 'OXYGEN', 'LANTERN', 'DARKNESS', 'PASSAGE', 'EXITWAY', 'CLIMBOUT', 'FREEDOM', 'SUNLIGHTS'];
+const letters = Array.from({ length: NR }, () => Array.from({ length: NC }, () => String.fromCharCode(65 + Math.floor(R() * 26))));
+let WORD = '';
+if (ENTRY === 'word') {
+  const w = WORDS.filter(x => x.length <= route.cells.length); const base = w.length ? pick(w) : 'GO';
+  WORD = (base + 'XXXXXXXXXXXXXXXXXXXX').slice(0, route.cells.length);
+  route.cells.forEach(([r, c], k) => { letters[r][c] = WORD[k]; });
+}
+const exitWord = { top: 'top', bottom: 'bottom', left: 'left', right: 'right' }[EXIT];
+const clue = (NSTART > 1 ? 'Several tunnels are marked. Only one of them leads out. ' : 'Begin at the marked tile. ') +
+  (MOVE === 'pipe' ? 'Follow the connected pipe from the marked tile. ' : MOVE === 'turn' ? `Each symbol turns you (you begin facing ${FWD.toLowerCase()}, toward the exit), then you step one tile. ` : MOVE === 'jump' ? 'Each symbol moves you one tile, or two if the key says so. ' : 'Each symbol tells you the next step. ') +
+  `Escape through the ${exitWord} edge. ` + (ENTRY === 'word' ? 'The small letters along your route spell the password. Type it.' : 'Mark every tile of the route.') + (LIT ? ' Some tunnels are lit for you.' : '');
+frame({ code: 'R3 · G9', title: 'The Tunnels', clue, hint: ENTRY === 'word' ? 'TYPE THE PASSWORD · CONTINUE' : 'CLICK A TILE TO MARK IT · CLICK AGAIN TO REMOVE' });
+const marked = new Set(NSTART === 1 ? [`${start[0]},${start[1]}`] : []);
+const startKeys = new Set(starts.map(([r, c]) => `${r},${c}`));
+const OPEN = Object.fromEntries(Object.entries(PIPE).map(([k, v]) => [v, k]));
+function pipeSvg(ch) { // strokes from the centre to each open side, stopping short of the tile border
+  const o = OPEN[ch] || '', e = { U: 'M50 50 L50 10', D: 'M50 50 L50 90', L: 'M50 50 L10 50', R: 'M50 50 L90 50' };
+  return `<svg viewBox="0 0 100 100" width="100%" height="100%"><path d="${[...o].map(x => e[x]).join(' ')}" stroke="currentColor" stroke-width="12" stroke-linecap="square" fill="none"/></svg>`;
+}
+function render() {
+  const tile = Math.max(34, Math.min(62, Math.floor(560 / Math.max(NR, NC)) - 4));
+  $('grid').style.gridTemplateColumns = `repeat(${NC}, ${tile}px)`;
+  document.documentElement.style.setProperty('--tile', tile + 'px');
+  let h = '';
+  for (let r = 0; r < NR; r++) for (let c = 0; c < NC; c++) {
+    const k = `${r},${c}`, isS = startKeys.has(k);
+    const cls = [MOVE === 'pipe' ? 'pipe' : '', isS && NSTART === 1 ? 'start' : isS ? 'cand' : '', marked.has(k) && !(isS && NSTART === 1) ? 'mark' : '', litCells.has(k) && !marked.has(k) ? 'lit' : ''].join(' ');
+    h += `<div class="t ${cls}" data-k="${k}">${ENTRY === 'word' ? `<i>${letters[r][c]}</i>` : ''}${MOVE === 'pipe' ? pipeSvg(grid[r][c]) : grid[r][c]}</div>`;
+  }
+  $('grid').innerHTML = h;
+  $('progress').textContent = ENTRY === 'word' ? 'PASSWORD' : `${marked.size} MARKED`;
+}
+if (ENTRY === 'click') $('grid').addEventListener('click', e => {
+  const t = e.target.closest('.t'); if (!t) return; const k = t.dataset.k;
+  if (NSTART === 1 && k === `${start[0]},${start[1]}`) return;
+  marked.has(k) ? marked.delete(k) : marked.add(k); render();
+});
+if (ENTRY === 'word') $('word').innerHTML = '<input id="pw" placeholder="PASSWORD" autocomplete="off">';
+const keyRows = Object.entries(mapping).map(([s, m]) => `<div><span>${s}</span><span>${m.replace(/2$/, ' ×2')}</span></div>`).join('');
+if (KEYMODE === 'panel' && keyRows) { $('keyh').textContent = keyTitle; $('keyrows').innerHTML = keyRows; $('keybtn').onclick = () => $('key').classList.toggle('on'); }
+else $('keybtn').style.display = 'none';
+if (KEYMODE === 'legend' && keyRows) $('legend').innerHTML = keyTitle + ' — ' + Object.entries(mapping).map(([s, m]) => `${s} = ${m.replace(/2$/, ' ×2')}`).join(' · ');
+if (P('truth') === '1') window.__truth = { rows: NR, cols: NC, move: MOVE, exit: EXIT, entry: ENTRY, starts: starts.map(([r, c]) => [r + 1, c + 1]),
+  grid: grid.map(row => row.join('')), mapping, heading: FWD, start: [start[0] + 1, start[1] + 1], route: route.cells.map(([r, c]) => [r + 1, c + 1]), word: WORD,
+  letters: letters.map(r => r.join('')) };
+render();
+const target = await sha([...onRoute].sort().join('|'));
+onSubmit(() => ENTRY === 'word' ? !!$('pw').value.trim() : marked.size > 0, async () => {
+  if (ENTRY === 'word') {
+    const v = $('pw').value.toUpperCase().replace(/[^A-Z]/g, '');
+    return { pct: v === WORD ? 100 : 0, notes: [v === WORD ? 'Password accepted.' : 'Wrong password.'] };
+  }
+  const ok = await sha([...marked].sort().join('|')) === target;
+  let hit = 0; for (const k of marked) if (onRoute.has(k)) hit++;
+  const extra = marked.size - hit;
+  return { pct: ok ? 100 : Math.round(100 * Math.max(0, hit - extra) / onRoute.size), notes: [ok ? 'Route complete.' : `${hit} of ${onRoute.size} route tiles marked, ${extra} extra.`] };
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>R3 · G10 — The Scramble (practice sim)</title>
+<!-- Local practice puzzle for testing the Sidekick. Answers are checked against SHA-256 hashes only, so neither a
+     player nor the solver can read them from the page. Styled after the fan-made Round 3 practice site. -->
+<style>
+  :root { --bg:#0b0708; --ink:#efe6dc; --dim:#9b8f86; --red:#e0245e; --tan:#d9b98a; --line:rgba(255,255,255,.1); }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; background:radial-gradient(ellipse at 50% 120%, #4a0a12 0%, var(--bg) 60%); color:var(--ink); font:15px/1.4 "Helvetica Neue", Arial, sans-serif; overflow:hidden; }
+  .badge { position:absolute; top:12px; left:50%; transform:translateX(-50%); border:1px solid var(--line); padding:3px 10px; font-size:10px; letter-spacing:.2em; color:var(--dim); }
+  #intro { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font:700 64px/1 "Oswald", Impact, sans-serif; color:var(--red); letter-spacing:.06em; z-index:5; background:var(--bg); transition:opacity .6s; }
+  #panel { position:absolute; left:28px; top:28px; width:330px; border:1px solid rgba(224,36,94,.5); border-radius:12px; padding:18px; background:rgba(12,8,9,.9); }
+  #panel .kicker { color:var(--red); font-size:11px; font-weight:700; letter-spacing:.08em; }
+  #panel h1 { font:300 34px/1.1 Georgia, serif; margin:6px 0 10px; }
+  #panel p { font:italic 14px/1.5 Georgia, serif; color:#cfc4ba; margin:0 0 12px; }
+  #panel .row { display:flex; justify-content:space-between; align-items:center; font-size:12px; }
+  #clock { color:var(--red); font:700 20px/1 "Courier New", monospace; }
+  #stage { position:absolute; left:400px; right:40px; top:90px; bottom:90px; display:flex; flex-direction:column; align-items:center; gap:26px; }
+  .words { display:flex; gap:26px; flex-wrap:wrap; justify-content:center; }
+  .word { display:flex; gap:6px; }
+  .slot { width:46px; height:54px; border:1.5px dashed rgba(217,185,138,.5); border-radius:8px; display:flex; align-items:center; justify-content:center; font:700 26px/1 Georgia, serif; cursor:pointer; }
+  .slot.filled { border-style:solid; background:var(--tan); color:#1a0f08; }
+  .slot.good { box-shadow:0 0 0 3px #22c55e; } .slot.bad { box-shadow:0 0 0 3px var(--red); }
+  .tiles { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; max-width:640px; }
+  .tile { width:46px; height:50px; border-radius:8px; background:#2a1d1f; border:1px solid var(--line); color:var(--ink); font:700 24px/50px Georgia, serif; text-align:center; cursor:pointer; user-select:none; }
+  .tile.used { opacity:.15; pointer-events:none; }
+  .btns { display:flex; gap:12px; }
+  button.pill { background:transparent; color:var(--ink); border:1px solid var(--line); border-radius:999px; padding:9px 18px; font-size:12px; letter-spacing:.12em; cursor:pointer; }
+  button.primary { border-color:var(--red); color:#fff; background:rgba(224,36,94,.18); }
+  #fb { min-height:22px; font-size:14px; letter-spacing:.06em; }
+  #fb.bad { color:var(--red); } #fb.good { color:#22c55e; }
+  .q { font:300 30px/1.2 Georgia, serif; text-align:center; max-width:640px; }
+  input.ans { width:360px; background:#1a1213; border:1.5px solid var(--tan); color:var(--ink); border-radius:10px; padding:12px 14px; font:700 24px/1 Georgia, serif; text-align:center; letter-spacing:.08em; outline:none; }
+  .hint { position:absolute; bottom:24px; left:50%; transform:translateX(-50%); font-size:11px; letter-spacing:.18em; color:var(--dim); }
+  .done { font:700 54px/1.1 "Oswald", Impact, sans-serif; color:#22c55e; text-align:center; letter-spacing:.05em; }
+  .eye { position:absolute; right:40px; top:26px; width:14px; height:14px; border-radius:50%; background:var(--red); animation:pulse 2.4s infinite; }
+  @keyframes pulse { 50% { opacity:.2; } }
+</style>
+</head>
+<body>
+<div class="badge">OFFLINE EDITION · SAMPLE PUZZLE</div>
+<div class="eye" title="ambient animation (noise for the watcher)"></div>
+<div id="intro">GAME 10: THE SCRAMBLE</div>
+<aside id="panel">
+  <div class="kicker">R3 · G10 &nbsp;THE SCRAMBLE</div>
+  <h1 id="title">The Scramble</h1>
+  <p id="clue"></p>
+  <div class="row"><span id="progress">STAGE 1 OF 3</span><span id="clock">00:00:00</span></div>
+</aside>
+<main id="stage"></main>
+<div class="hint" id="hint">CLICK TILES TO FILL THE SLOTS · CLICK A FILLED SLOT TO RETURN ITS TILE</div>
+<script>
+// ?seed=N picks the quote (all from the sample corpus's pages 249-288). Seed 1 is the first entry.
+// These lines are invented filler for the harness: swap in phrases from your own corpus.
+const ENTRIES = [
+  { q: 'SO THAT OTHERS MAY GO', who: 'RIVERA', page: '258', clue: 'Spoken in the rubble, over a fallen stranger.', hint: 'almost talking to himself' },
+  { q: 'GO AND COUNT THEM', who: 'WARDEN', page: '263', clue: 'A voice from a speaker sends them into the ruined city.', hint: 'the one on the speaker' },
+  { q: 'THIS IS WHY IM HERE', who: 'OKONKWO', page: '274', clue: 'Said carrying someone out, on a broken street.', hint: 'the tallest of them' },
+  { q: 'THAT WAS GOOD WORK', who: 'DELACROIX', page: '272', clue: 'Said through sweat, after a catch that should not have worked.', hint: 'she grins' },
+  { q: 'WHERE DO WE EVEN START', who: 'ASHBY', page: '265', clue: 'Asked while looking at a city crushed to rubble.', hint: 'she asks it' },
+  { q: 'THE CHILD IS SAFE', who: 'MERCER', page: '269', clue: 'Said calmly, while a building burns.', hint: 'her voice calm' },
+  { q: 'SOMETIMES WITNESSES LIE', who: 'RIVERA', page: '252', clue: 'Said in a shelter, about the people in charge.', hint: 'he answers a question' },
+];
+const SEED = Math.max(1, Number(new URLSearchParams(location.search).get('seed') || 1));
+const E = ENTRIES[(SEED - 1) % ENTRIES.length];
+const H = {};
+const LENGTHS = E.q.split(' ').map(w => w.length);
+const LETTERS = E.q.replace(/ /g, '').split(''); // shuffled before display; checked only via hash
+const sha = async s => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map(b => b.toString(16).padStart(2, '0')).join('');
+const norm = s => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+const $ = id => document.getElementById(id);
+const t0 = Date.now();
+setInterval(() => { const s = Math.floor((Date.now() - t0) / 1000); $('clock').textContent = `00:${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; }, 1000);
+setTimeout(() => { $('intro').style.opacity = 0; setTimeout(() => $('intro').remove(), 700); }, 3000);
+
+let tiles = [], slots = [];
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+
+function stage1() {
+  $('progress').textContent = 'STAGE 1 OF 3';
+  $('clue').textContent = `PRACTICE. ${E.clue} Unscramble the tiles into the words that were said.`;
+  tiles = shuffle(LETTERS.map((ch, i) => ({ ch, id: i, used: false })));
+  slots = LENGTHS.flatMap((n, w) => Array.from({ length: n }, () => ({ w, tile: null })));
+  $('stage').innerHTML = `<div class="words" id="words"></div><div class="tiles" id="tiles"></div>
+    <div class="btns"><button class="pill" id="shuf">SHUFFLE</button><button class="pill" id="clr">CLEAR</button><button class="pill primary" id="chk">CHECK</button></div><div id="fb"></div>`;
+  render1();
+  $('shuf').onclick = () => { const free = tiles.filter(t => !t.used); shuffle(free); let k = 0; tiles = tiles.map(t => t.used ? t : free[k++]); render1(); };
+  $('clr').onclick = () => { slots.forEach(s => s.tile = null); tiles.forEach(t => t.used = false); render1(); };
+  $('chk').onclick = async () => {
+    if (slots.some(s => !s.tile)) return fb('FILL EVERY SLOT FIRST', 'bad');
+    const guess = slots.map(s => s.tile.ch).join('');
+    if (await sha(guess) === H.s1) { fb('CORRECT — THE WORDS ARE RIGHT', 'good'); setTimeout(stage2, 1600); }
+    else {
+      // per-word feedback: which words are real book-order words is not revealed; only a count of placed letters
+      fb('NOT QUITE. TRY ANOTHER ORDER', 'bad');
+      document.querySelectorAll('.slot').forEach(e => e.classList.add('bad'));
+      setTimeout(() => document.querySelectorAll('.slot').forEach(e => e.classList.remove('bad')), 1200);
+    }
+  };
+}
+function render1() {
+  let k = 0;
+  $('words').innerHTML = LENGTHS.map(n => `<div class="word">${Array.from({ length: n }, () => { const s = slots[k]; return `<div class="slot ${s.tile ? 'filled' : ''}" data-i="${k++}">${s.tile ? s.tile.ch : ''}</div>`; }).join('')}</div>`).join('');
+  $('tiles').innerHTML = tiles.map((t, i) => `<div class="tile ${t.used ? 'used' : ''}" data-i="${i}">${t.ch}</div>`).join('');
+  document.querySelectorAll('.tile').forEach(e => e.onclick = () => { const t = tiles[+e.dataset.i]; const s = slots.find(x => !x.tile); if (!s || t.used) return; s.tile = t; t.used = true; render1(); });
+  document.querySelectorAll('.slot').forEach(e => e.onclick = () => { const s = slots[+e.dataset.i]; if (!s.tile) return; s.tile.used = false; s.tile = null; render1(); });
+}
+function fb(msg, cls) { $('fb').textContent = msg; $('fb').className = cls; }
+
+function textStage(n, question, clue, hash, next, placeholder) {
+  $('progress').textContent = `STAGE ${n} OF 3`;
+  $('clue').textContent = clue;
+  $('hint').textContent = 'TYPE YOUR ANSWER · PRESS ENTER OR CHECK';
+  $('stage').innerHTML = `<div class="q">${question}</div><input class="ans" id="ans" placeholder="${placeholder}" autocomplete="off">
+    <div class="btns"><button class="pill primary" id="chk">CHECK</button></div><div id="fb"></div>`;
+  const check = async () => {
+    const v = norm($('ans').value);
+    const words = $('ans').value.toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+    const hashes = await Promise.all([v, ...words].map(sha));
+    if (hashes.includes(hash)) { fb('CORRECT', 'good'); setTimeout(next, 1400); } else fb('NO. LOOK AGAIN', 'bad');
+  };
+  $('chk').onclick = check;
+  $('ans').onkeydown = e => { if (e.key === 'Enter') check(); };
+  $('ans').focus();
+}
+function stage2() {
+  textStage(2, 'WHO SAID IT?', `PRACTICE. The words are right. Now name the one who said them (${E.hint}).`, H.s2, stage3, 'name');
+}
+function stage3() {
+  textStage(3, 'ON WHICH PAGE?', 'PRACTICE. Last step. Give the page of the book where those words were spoken.', H.s3, done, 'page number');
+}
+function done() {
+  $('progress').textContent = 'COMPLETE';
+  $('hint').textContent = '';
+  $('stage').innerHTML = `<div class="done">TRANSMISSION<br>COMPLETE</div><div class="q" style="font-size:20px">All three stages solved.</div>`;
+}
+(async () => { H.s1 = await sha(E.q.replace(/ /g, '')); H.s2 = await sha(E.who); H.s3 = await sha(E.page); stage1(); })();
+</script>
+</body>
+</html>

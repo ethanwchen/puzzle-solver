@@ -1,0 +1,36 @@
+# ---------------------------------------------------------------------------
+# The corpus. This repo ships NO source text. Point the tools at your own, and
+# keep both the source and anything derived from it out of version control.
+# ---------------------------------------------------------------------------
+book/
+corpus/
+*.pdf
+*.epub
+*.mobi
+*.azw3
+
+# Derived indexes and notes (built locally from your corpus)
+*.tsv
+!tools/simulator/results.example.tsv
+digest/
+notes/
+calibration/
+
+# Live-puzzle working folders: screenshots of someone else's puzzle are theirs
+challenges/
+practice/
+research/
+.grading/
+scratchpad/
+sessions/
+
+# Runtime / build
+node_modules/
+.cache/
+__pycache__/
+*.pyc
+.playwright-mcp/
+tools/ocr/ocr
+tools/simulator/results.tsv
+*.log
+.DS_Store

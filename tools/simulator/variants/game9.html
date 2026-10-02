@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>G9 variant: The Tunnels</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  #grid { display:grid; gap:4px; }
+  .t.lit { box-shadow:0 0 14px 3px rgba(255,214,120,.55) inset, 0 0 10px rgba(255,214,120,.45); color:#ffe7b0; }
+  .t { width:var(--tile, 62px); height:var(--tile, 62px); font-size:calc(var(--tile, 62px) * .45); background:#1a1113; border:1px solid var(--line); border-radius:6px; display:flex; align-items:center; justify-content:center; font-weight:700; font-family:Georgia; color:#cdbfb3; cursor:pointer; }
+  .t.start { box-shadow:0 0 0 3px var(--cyan) inset; color:var(--cyan); }
+  .t.mark { background:#4a1422; box-shadow:0 0 0 2px var(--red) inset; color:#fff; }
+  .t.mark.top { background:#113a44; box-shadow:0 0 0 2px var(--cyan) inset; }
+  #keybtn { position:absolute; right:28px; top:60px; z-index:4; }
+  #key { position:absolute; right:28px; top:104px; width:250px; background:#140c0e; border:1px solid var(--line); border-radius:12px; padding:14px; display:none; z-index:6; }
+  #key.on { display:block; }
+  #key h3 { margin:0 0 8px; font:600 12px Arial; letter-spacing:.18em; color:var(--dim); }
+  #key div { display:flex; justify-content:space-between; font:700 20px Georgia; padding:4px 0; }
+  #key span:last-child { font:600 13px Arial; letter-spacing:.12em; color:var(--tan); align-self:center; }
+</style>
+</head>
+<body>
+<main id="stage"><div id="grid"></div></main>
+<button class="pill" id="keybtn">VIEW KEY</button>
+<div id="key"><h3>KEY · FOLLOW THE SYMBOL</h3><div id="keyrows"></div></div>
+<script type="module">
+import { R, pick, shuffle, sha, $, frame, onSubmit, params } from './common.js';
+const SETS = [['◐', '◑', '◒', '◓'], ['Ⅰ', 'Ⅱ', 'Ⅲ', 'Ⅳ'], ['♠', '♥', '♦', '♣'], ['Ψ', 'Ω', 'Δ', 'Σ'], ['↑', '↓', '←', '→']];
+const DIRS = { UP: [-1, 0], DOWN: [1, 0], LEFT: [0, -1], RIGHT: [0, 1] };
+const syms = pick(SETS);
+const mapping = {}; shuffle(Object.keys(DIRS)).forEach((d, i) => { mapping[syms[i]] = d; }); // symbol -> direction
+// size: ?n=N (square) or ?rows=R&cols=C; default a random 5–7 square
+const NR = Number(params.get('rows') || params.get('n')) || pick([5, 6, 7]);
+const NC = Number(params.get('cols') || params.get('n')) || NR;
+const N = NR; // legacy name for the row count
+const LIT = params.get('lit') === '1'; // fragment-7 trap: a lit/suggested path that is NOT the route
+// random self-avoiding route from the bottom row to the top edge (mostly up, with detours)
+let route;
+for (let tries = 0; tries < 500; tries++) {
+  let r = NR - 1, c = Math.floor(R() * NC); const seen = new Set([`${r},${c}`]); route = [[r, c]];
+  let ok = true;
+  while (r > 0 && ok) {
+    const opts = [['UP', 3], ['LEFT', 1], ['RIGHT', 1]].flatMap(([d, w]) => Array(w).fill(d)).filter(d => {
+      const [dr, dc] = DIRS[d], nr = r + dr, nc = c + dc; return nc >= 0 && nc < NC && nr >= 0 && !seen.has(`${nr},${nc}`);
+    });
+    if (!opts.length) { ok = false; break; }
+    const d = pick(opts); r += DIRS[d][0]; c += DIRS[d][1]; seen.add(`${r},${c}`); route.push([r, c]);
+  }
+  if (ok && route.length >= NR + 1 && route.length <= 2 * NR + 3) break;
+}
+const dirOf = {}; // cell -> direction symbol
+const symFor = d => Object.keys(mapping).find(s => mapping[s] === d);
+for (let k = 0; k < route.length; k++) {
+  const [r, c] = route[k];
+  const d = k + 1 < route.length ? Object.keys(DIRS).find(x => DIRS[x][0] === route[k + 1][0] - r && DIRS[x][1] === route[k + 1][1] - c) : 'UP';
+  dirOf[`${r},${c}`] = symFor(d);
+}
+const onRoute = new Set(route.map(([r, c]) => `${r},${c}`));
+for (let r = 0; r < NR; r++) for (let c = 0; c < NC; c++) if (!onRoute.has(`${r},${c}`)) dirOf[`${r},${c}`] = pick(syms);
+// the lit decoy: a glowing straight-up path from the start that is NOT the route (follow the symbols, not the light)
+const litCells = new Set();
+if (LIT) { const sc = route[0][1]; for (let r = NR - 2; r >= 0; r--) if (!onRoute.has(`${r},${sc}`)) litCells.add(`${r},${sc}`); }
+const start = route[0];
+frame({ code: 'R3 · G9', title: 'The Tunnels',
+  clue: 'Begin at the marked tile. Its symbol tells you the next step. Follow one tile at a time and mark the entire route. Escape through the top edge. The key shows the four moves.' + (LIT ? ' Some tunnels are lit for you.' : ''),
+  hint: 'CLICK A TILE TO MARK IT · CLICK AGAIN TO REMOVE · VIEW KEY FOR THE MOVES' });
+const marked = new Set([`${start[0]},${start[1]}`]);
+function render() {
+  const tile = Math.max(34, Math.min(62, Math.floor(560 / Math.max(NR, NC)) - 4));
+  $('grid').style.gridTemplateColumns = `repeat(${NC}, ${tile}px)`;
+  document.documentElement.style.setProperty('--tile', tile + 'px');
+  let h = '';
+  for (let r = 0; r < NR; r++) for (let c = 0; c < NC; c++) {
+    const k = `${r},${c}`, isStart = k === `${start[0]},${start[1]}`;
+    h += `<div class="t ${isStart ? 'start' : ''} ${marked.has(k) && !isStart ? 'mark' : ''} ${marked.has(k) && r === 0 ? 'top' : ''} ${litCells.has(k) && !marked.has(k) ? 'lit' : ''}" data-k="${k}">${dirOf[k]}</div>`;
+  }
+  $('grid').innerHTML = h;
+  $('progress').textContent = `${marked.size} MARKED`;
+}
+$('grid').addEventListener('click', e => {
+  const t = e.target.closest('.t'); if (!t) return; const k = t.dataset.k;
+  if (k === `${start[0]},${start[1]}`) return;
+  if (marked.has(k)) marked.delete(k);
+  else { if (k.startsWith('0,')) for (const m of [...marked]) if (m.startsWith('0,')) marked.delete(m); marked.add(k); } // one top-row exit
+  render();
+});
+if (params.get('truth') === '1') window.__truth = { rows: NR, cols: NC, grid: Array.from({ length: NR }, (_, r) => Array.from({ length: NC }, (_, c) => dirOf[`${r},${c}`]).join('')), start: [route[0][0] + 1, route[0][1] + 1], mapping, route: route.map(([r, c]) => [r + 1, c + 1]) };
+$('keyrows').innerHTML = syms.map(s => `<div><span>${s}</span><span>${mapping[s]}</span></div>`).join('');
+$('keybtn').onclick = () => $('key').classList.toggle('on');
+render();
+const target = await sha([...onRoute].sort().join('|'));
+onSubmit(() => [...marked].some(k => k.startsWith('0,')), async () => {
+  const ok = await sha([...marked].sort().join('|')) === target;
+  let hit = 0; for (const k of marked) if (onRoute.has(k)) hit++;   // (practice feedback: counts only, no cell names)
+  const extra = marked.size - hit;
+  return { pct: ok ? 100 : Math.round(100 * Math.max(0, hit - extra) / onRoute.size), notes: [ok ? 'Route complete.' : `${hit} of ${onRoute.size} route tiles marked, ${extra} extra.`] };
+});
+</script>
+</body>
+</html>

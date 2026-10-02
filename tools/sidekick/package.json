@@ -1,0 +1,16 @@
+{
+  "name": "puzzle-sidekick",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Always-on-top puzzle sidekick overlay for the Puzzle Solver toolkit",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^38.0.0"
+  },
+  "allowScripts": {
+    "electron@38.8.6": true
+  }
+}

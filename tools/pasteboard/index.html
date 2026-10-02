@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Puzzle Solver Pasteboard</title>
+<style>
+  :root { --bg:#0e0c0e; --panel:#18141a; --ink:#ece6dc; --dim:#9a938c; --pink:#ec4899; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --line:#2c2530; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 24px 20px 60px; }
+  h1 { font-size: 18px; margin: 0 0 16px; letter-spacing: .04em; } h1 span { color: var(--pink); }
+  #drop { border: 2px dashed var(--line); border-radius: 14px; min-height: 150px; padding: 18px; background: var(--panel);
+          display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:center; cursor:pointer; transition: border-color .15s; }
+  #drop.hot { border-color: var(--pink); }
+  #drop .hint { color: var(--dim); text-align:center; width:100%; }
+  #drop kbd { background:#2a232d; border-radius:5px; padding:1px 6px; color:var(--ink); }
+  .thumb { position:relative; } .thumb img { height: 120px; border-radius: 8px; border:1px solid var(--line); display:block; }
+  .thumb button { position:absolute; top:4px; right:4px; background:#000a; color:#fff; border:0; border-radius:50%; width:22px; height:22px; cursor:pointer; }
+  textarea { width:100%; margin-top:12px; background:var(--panel); color:var(--ink); border:1px solid var(--line); border-radius:10px; padding:10px; min-height:56px; font:inherit; }
+  .row { display:flex; gap:10px; align-items:center; margin-top:12px; flex-wrap:wrap; }
+  .seg { display:flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .seg button { background:transparent; color:var(--dim); border:0; padding:9px 14px; cursor:pointer; font:inherit; }
+  .seg button.on { background:#2a232d; color:var(--ink); }
+  #go { background:var(--pink); color:#fff; border:0; border-radius:10px; padding:10px 22px; font-weight:600; cursor:pointer; font:inherit; }
+  #go:disabled { opacity:.5; cursor:default; }
+  .timer { color:var(--dim); font-variant-numeric: tabular-nums; margin-left:auto; }
+  #card { margin-top:22px; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px; display:none; }
+  .label { color:var(--dim); font-size:12px; text-transform:uppercase; letter-spacing:.08em; }
+  .answer { font-size: 30px; font-weight: 700; margin: 4px 0 10px; word-break: break-word; display:flex; gap:12px; align-items:flex-start; }
+  .answer button { font-size:13px; background:#2a232d; color:var(--ink); border:0; border-radius:8px; padding:6px 10px; cursor:pointer; flex:none; margin-top:6px; }
+  .badges { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  .badge { border-radius:999px; padding:3px 10px; font-size:13px; background:#2a232d; }
+  .badge.ok { background:#14532d; } .badge.warn { background:#78350f; } .badge.bad { background:#7f1d1d; }
+  .bar { height:6px; background:#2a232d; border-radius:4px; overflow:hidden; margin:4px 0 14px; } .bar i { display:block; height:100%; background:var(--ok); }
+  .section { margin-top:12px; } .section div { white-space: pre-wrap; }
+  details { margin-top:12px; } summary { cursor:pointer; color:var(--dim); }
+  .runs { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap:10px; margin-top:14px; }
+  .run { border:1px solid var(--line); border-radius:10px; padding:10px; font-size:13px; }
+  .run b { text-transform:capitalize; } .muted { color:var(--dim); }
+  .err { color: var(--bad); margin-top:10px; white-space:pre-wrap; }
+  @media (max-width: 620px) { .wrap { display:flex; flex-direction:column; padding:12px; } #card { order:-1; margin:0 0 12px; } .answer { font-size: 26px; } #drop { min-height: 90px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Puzzle Solver <span>Pasteboard</span></h1>
+  <div id="drop" tabindex="0">
+    <div class="hint" id="hint">Paste a screenshot with <kbd>⌘</kbd> <kbd>V</kbd>, drag images here, or click to choose.<br>Add every screen and hint panel.</div>
+  </div>
+  <input type="file" id="file" accept="image/*" multiple hidden>
+  <textarea id="notes" placeholder="Hints, riddle text, anything not visible in the screenshots (optional)"></textarea>
+  <div class="row">
+    <div class="seg" id="mode">
+      <button data-v="fast" class="on">Fast · 1 agent</button>
+      <button data-v="verified">Verified · 3 agents</button>
+    </div>
+    <select id="round" title="which part of the book this round draws from" style="background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:9px">
+      <option value="R3" selected>Round 3 · pp.249–288</option><option value="R4">Round 4 · pp.289–449</option><option value="any">Whole book</option>
+    </select>
+    <label class="muted" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="auto" checked> solve on paste</label>
+    <button id="reset" style="background:transparent;color:var(--dim);border:1px solid var(--line);border-radius:10px;padding:9px 12px;cursor:pointer">New puzzle ⌘K</button>
+    <button id="go" disabled>Solve <span class="muted">⌘↵</span></button>
+    <span class="timer" id="timer"></span>
+  </div>
+  <div id="err" class="err"></div>
+
+  <div id="card">
+    <div class="label">Answer</div>
+    <div class="answer"><span id="ans">…</span><button id="copy">Copy</button></div>
+    <div class="badges" id="badges"></div>
+    <div class="label">Confidence</div>
+    <div class="bar"><i id="conf" style="width:0"></i></div>
+    <div class="section"><div class="label">How to enter</div><div id="how"></div></div>
+    <div class="section" id="nextWrap"><div class="label">Next screen</div><div id="next"></div></div>
+    <details><summary>Reasoning & citations</summary><div class="section"><div id="why"></div></div><div class="section"><div id="cites" class="muted"></div></div></details>
+    <div class="runs" id="runs"></div>
+  </div>
+</div>
+<script>
+const images = [];
+let mode = "fast", poll = null, t0 = 0, tick = null;
+const $ = id => document.getElementById(id);
+
+function addImage(file) {
+  const r = new FileReader();
+  r.onload = () => { images.push(r.result); render(); };
+  r.readAsDataURL(file);
+}
+function render() {
+  const drop = $("drop");
+  drop.querySelectorAll(".thumb").forEach(n => n.remove());
+  $("hint").style.display = images.length ? "none" : "";
+  images.forEach((src, i) => {
+    const d = document.createElement("div"); d.className = "thumb";
+    d.innerHTML = `<img src="${src}"><button title="remove">×</button>`;
+    d.querySelector("button").onclick = e => { e.stopPropagation(); images.splice(i, 1); render(); };
+    drop.appendChild(d);
+  });
+  $("go").disabled = !images.length;
+}
+let autoTimer = null;
+document.addEventListener("paste", e => {
+  let got = false;
+  for (const it of e.clipboardData.items) if (it.type.startsWith("image/")) { addImage(it.getAsFile()); got = true; }
+  // Solve-on-paste: wait 1.2s for more screens (multi-screen games), then solve automatically.
+  if (got && $("auto").checked) { clearTimeout(autoTimer); autoTimer = setTimeout(() => { if (!$("go").disabled) solve(); }, 1200); }
+});
+const drop = $("drop");
+drop.onclick = () => $("file").click();
+$("file").onchange = e => [...e.target.files].forEach(addImage);
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("hot"); };
+drop.ondragleave = () => drop.classList.remove("hot");
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove("hot"); [...e.dataTransfer.files].filter(f => f.type.startsWith("image/")).forEach(addImage); };
+$("mode").onclick = e => {
+  if (!e.target.dataset.v) return;
+  mode = e.target.dataset.v;
+  [...$("mode").children].forEach(b => b.classList.toggle("on", b === e.target));
+};
+document.addEventListener("keydown", e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !$("go").disabled) solve(); });
+$("go").onclick = solve;
+function resetAll() { images.length = 0; render(); $("notes").value = ""; $("card").style.display = "none"; $("err").textContent = ""; $("timer").textContent = ""; }
+$("reset").onclick = resetAll;
+document.addEventListener("keydown", e => { if (e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); resetAll(); } });
+$("copy").onclick = () => navigator.clipboard.writeText($("ans").textContent);
+
+async function solve() {
+  $("err").textContent = ""; $("go").disabled = true; $("card").style.display = "block";
+  $("ans").textContent = "Solving…"; $("badges").innerHTML = ""; $("runs").innerHTML = "";
+  t0 = Date.now(); clearInterval(tick);
+  tick = setInterval(() => $("timer").textContent = ((Date.now() - t0) / 1000).toFixed(0) + "s", 250);
+  try {
+    const res = await fetch("/solve", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ images, notes: $("notes").value, mode, round: $("round").value }) });
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || res.statusText);
+    clearInterval(poll); poll = setInterval(() => check(j.id), 1000);
+  } catch (e) { $("err").textContent = e.message; $("go").disabled = false; clearInterval(tick); }
+}
+
+async function check(id) {
+  const j = await (await fetch("/status/" + id)).json();
+  $("runs").innerHTML = Object.values(j.runs).map(r => `<div class="run"><b>${r.lens}</b> · <span class="muted">${r.status}${r.seconds ? " · " + r.seconds + "s" : ""}</span><br>${r.result ? esc(r.result.answer) + ` <span class="muted">(${Math.round((r.result.confidence || 0) * 100)}%)</span>` : esc(r.error || "")}</div>`).join("");
+  const s = j.summary;
+  if (s) {
+    $("ans").textContent = s.answer || "(no answer)";
+    const c = Math.round((s.confidence || 0) * 100);
+    $("conf").style.width = c + "%";
+    $("conf").style.background = c >= 80 ? "var(--ok)" : c >= 50 ? "var(--warn)" : "var(--bad)";
+    $("badges").innerHTML = `<span class="badge">${esc(s.agreement)}</span><span class="badge ${c >= 80 ? "ok" : c >= 50 ? "warn" : "bad"}">${c}% confident</span>` +
+      (s.check_yourself ? `<span class="badge warn">check yourself</span>` : `<span class="badge ok">consistent</span>`) +
+      (s.alternatives && s.alternatives.length ? `<span class="badge bad">alt: ${esc(s.alternatives.join(" | "))}</span>` : "");
+    $("how").textContent = s.how_to_enter || "";
+    $("nextWrap").style.display = s.next_screen ? "" : "none"; $("next").textContent = s.next_screen || "";
+    $("why").textContent = s.reasoning || "";
+    $("cites").textContent = (s.citations || []).join("\n");
+  }
+  if (j.finished !== null) {
+    clearInterval(poll); clearInterval(tick);
+    $("timer").textContent = "done in " + j.finished + "s";
+    if (s && s.answer) { chime(); document.title = "✅ " + s.answer; }
+    $("go").disabled = false;
+    if (!s) $("err").textContent = "No answer: " + Object.values(j.runs).map(r => r.error).filter(Boolean).join("; ");
+  }
+}
+function chime() {
+  try { const a = new (window.AudioContext || window.webkitAudioContext)(); [880, 1320].forEach((f, i) => {
+    const o = a.createOscillator(), g = a.createGain(); o.frequency.value = f; o.connect(g); g.connect(a.destination);
+    g.gain.setValueAtTime(0.15, a.currentTime + i * 0.12); g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + i * 0.12 + 0.25);
+    o.start(a.currentTime + i * 0.12); o.stop(a.currentTime + i * 0.12 + 0.3); }); } catch (_) {}
+}
+const esc = t => String(t ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+</script>
+</body>
+</html>

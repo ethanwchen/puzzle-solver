@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>G8 variant B: The Message Between</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  #board { display:grid; gap:6px; }
+  .cell { width:58px; height:58px; display:flex; align-items:center; justify-content:center; background:#1c1214; border:1px solid var(--line); font:700 26px Georgia; }
+  .axis { width:58px; height:58px; display:flex; flex-direction:column; align-items:center; justify-content:center; border:1.5px solid rgba(94,200,216,.55); border-radius:9px; background:#0f1a1c; color:var(--cyan); cursor:grab; font:700 20px Georgia; text-align:center; }
+  .axis small { font:600 9px/1 Arial; letter-spacing:.06em; margin-top:2px; }
+  .axis.name { font:700 11px Arial; letter-spacing:.04em; }
+  .axis:focus { outline:2px solid var(--red); }
+  .corner { width:58px; height:58px; }
+  #tx { position:absolute; inset:40px 30px 70px 350px; background:#140c0e; border:1px solid var(--line); border-radius:14px; display:none; flex-direction:column; align-items:center; justify-content:center; gap:14px; z-index:10; }
+  #tx.on { display:flex; }
+  #tx h2 { margin:0; font:600 14px Arial; letter-spacing:.2em; }
+  #cards { display:flex; flex-wrap:wrap; gap:10px 12px; justify-content:center; max-width:780px; }
+  .card { display:flex; flex-direction:column; align-items:center; gap:4px; }
+  .coord { min-width:56px; height:62px; padding:0 6px; border:1px solid var(--line); border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; font:700 16px Georgia; background:#1c1214; }
+  .coord small { font:600 15px Georgia; color:var(--cyan); }
+  .coord.word { font:700 11px Arial; letter-spacing:.04em; }
+  .coord.word small { font:700 11px Arial; }
+  .box { width:40px; height:40px; border:1.5px dashed rgba(217,185,138,.6); border-radius:6px; display:flex; align-items:center; justify-content:center; font:700 22px Georgia; cursor:text; }
+  .box.filled { background:var(--tan); color:#1a0f08; border-style:solid; }
+  .box.sel { outline:2px solid var(--red); }
+  #field { width:420px; background:#1a1213; border:1.5px solid var(--tan); color:var(--ink); border-radius:10px; padding:10px 14px; font:700 22px Georgia; letter-spacing:.12em; text-align:center; }
+</style>
+</head>
+<body>
+<main id="stage"><div id="board"></div><button class="pill" id="open">OPEN THE TRANSMISSION</button></main>
+<div id="tx"><h2>THE TRANSMISSION</h2><div id="cards"></div><input id="field" placeholder="type the transmission" autocomplete="off" style="display:none"><button class="pill" id="close">CLOSE THE TRANSMISSION</button></div>
+<script type="module">
+import { R, pick, shuffle, sha, $, frame, onSubmit, params, seed } from './common.js';
+// Corpus facts used as keys: roster numbers, order of losses, order of the stages. All invented filler here --
+// replace them with facts from your own corpus so the keys actually have to be looked up.
+const PLAYER_NO = { BRENNER: 2, ANT: 3, SAAD: 7, ASHBY: 9, ELSWORTH: 17, CARLOS: 39, OKONKWO: 77, CALLOW: 87, GRANT: 112, DUNMORE: 156, MERCER: 222, DELACROIX: 638, RIVERA: 711, NORTH: 930 };
+const LOST = ['GRANT', 'BRENNER', 'CALLOW', 'DUNMORE', 'ELSWORTH'];             // p101, p212, p219, p258, p277
+const GAMES = { ICE: '✱', CAVE: '◒', WAR: '✚', DUEL: '†' };                     // stage 1 ice, 2 cave, 3 city, 4 duels
+const DANGERS = { FIRE: '▲', WAVE: '≈', STORM: 'ϟ', SAND: '∴', SMOKE: '◎' };
+const NUM = ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE'];
+const PHRASES = ['LET HIM GO', 'TRUST ME', 'SURVIVE', 'NOT TWO', 'FLYING AT LAST', 'THREE SPLASHES', 'GO SAVE SOME LIVES', 'YOU EARNED WATER',
+  'THAT WAS TEAMWORK', 'THE GIRL IS DRY', 'SO THAT OTHERS MAY LIVE', 'WHERE DO WE EVEN START'];
+
+const get = (k, opts) => params.get(k) || pick(opts);
+const rowKey = get('rows', ['explicit', 'number', 'loss']);
+const colKey = get('cols', ['explicit', 'games']);
+const moveMode = get('move', ['swap', 'swap', 'insert', 'carry']);       // carry = letters travel with their markers
+const notation = get('notation', ['cards', 'words']);
+const entryMode = get('entry', ['boxes', 'auto', 'field']);
+
+const RN = Number(params.get('rn')) || pick([3, 4]), CN = colKey === 'games' ? 4 : (Number(params.get('cn')) || pick([3, 4]));
+let rowNames, rowTarget, rowClue;
+if (rowKey === 'number') {
+  rowNames = shuffle(Object.keys(PLAYER_NO)).slice(0, RN);
+  rowTarget = rowNames.slice().sort((a, b) => PLAYER_NO[a] - PLAYER_NO[b]);
+  rowClue = 'The row markers are contestants: put them in order of their player numbers, lowest at the top.';
+} else if (rowKey === 'loss') {
+  rowNames = shuffle(LOST.slice()).slice(0, RN);
+  rowTarget = LOST.filter(n => rowNames.includes(n));
+  rowClue = 'The row markers are the lost: put them from earliest loss (top) to latest.';
+} else {
+  rowNames = NUM.slice(0, Math.min(RN, NUM.length)); rowTarget = rowNames.slice();
+  rowClue = `Put the row markers ${rowTarget.join(', ')} from top to bottom.`;
+}
+let colNames, colTarget, colClue, GLYPH;
+if (colKey === 'games') {
+  colNames = Object.keys(GAMES); colTarget = colNames.slice(); GLYPH = GAMES;
+  colClue = 'Put the dangers in the order the contestants faced them, left to right.';
+} else {
+  colNames = shuffle(Object.keys(DANGERS)).slice(0, Math.min(CN, 5)); colTarget = colNames.slice(); GLYPH = DANGERS;
+  colClue = `Put ${colTarget.join(', ')} from left to right.`;
+}
+const C2 = colTarget.length;
+const fits = PHRASES.filter(p => p.replace(/ /g, '').length + 1 <= RN * C2);
+const phrase = pick(fits.filter(p => p.length >= Math.min(14, RN * C2 - 4)).length ? fits.filter(p => p.length >= Math.min(14, RN * C2 - 4)) : fits);
+// physical seats (target arrangement): row i = rowTarget[i], col j = colTarget[j]
+const seats = Array.from({ length: RN }, () => Array(C2).fill(''));
+const free = shuffle([...Array(RN * C2).keys()]);
+const coords = []; let blank = null;
+for (const ch of phrase) {
+  let seat;
+  if (ch === ' ') { if (blank === null) blank = free.pop(); seat = blank; }
+  else { seat = free.pop(); seats[Math.floor(seat / C2)][seat % C2] = ch; }
+  coords.push([rowTarget[Math.floor(seat / C2)], colTarget[seat % C2]]);
+}
+const FILL = 'ABCDEFGHIKLMNOPRSTUVWY';
+for (const s of free) seats[Math.floor(s / C2)][s % C2] = FILL[Math.floor(R() * FILL.length)];
+// the letters are laid out under the TARGET order; the markers start shuffled
+let rows = shuffle(rowTarget.slice()), cols = shuffle(colTarget.slice());
+if (rows.join() === rowTarget.join()) rows.reverse();
+if (cols.join() === colTarget.join()) cols.reverse();
+// carry mode: letters travel with their markers, so start the letter rows/cols in the shuffled order too
+let rowPerm = rows.map(n => rowTarget.indexOf(n)), colPerm = cols.map(n => colTarget.indexOf(n));
+if (moveMode !== 'carry') { rowPerm = rowTarget.map((_, i) => i); colPerm = colTarget.map((_, i) => i); }
+const seat = (r, c) => seats[rowPerm[r]][colPerm[c]];
+
+frame({ code: 'R3 · G8', title: 'The Message Between',
+  clue: `${rowClue} ${colClue} Open the transmission. Read each coordinate at its intersection. Fill every box${phrase.includes(' ') ? ', including the space' : ''}.`,
+  hint: 'CLICK + DRAG MARKERS · ARROW KEYS MOVE A FOCUSED MARKER' });
+const entry = Array(coords.length).fill('');
+const isName = n => !NUM.includes(n);
+function renderBoard() {
+  const b = $('board'); b.style.gridTemplateColumns = `repeat(${C2 + 1}, 58px)`;
+  let h = '<div class="corner"></div>' + cols.map((c, i) => `<div class="axis" tabindex="0" data-ax="c" data-i="${i}">${GLYPH[c]}<small>${c}</small></div>`).join('');
+  for (let r = 0; r < RN; r++) {
+    const lab = isName(rows[r]) ? `<div class="axis name" tabindex="0" data-ax="r" data-i="${r}">${rows[r]}</div>` : `<div class="axis" tabindex="0" data-ax="r" data-i="${r}">${NUM.indexOf(rows[r]) + 1}<small>${rows[r]}</small></div>`;
+    h += lab + Array.from({ length: C2 }, (_, c) => `<div class="cell">${seat(r, c)}</div>`).join('');
+  }
+  b.innerHTML = h;
+  $('progress').textContent = `${entry.filter(Boolean).length} / ${coords.length}`;
+}
+function move(ax, i, j) { // swap | insert | carry (swap markers AND their letters)
+  const a = ax === 'c' ? cols : rows, perm = ax === 'c' ? colPerm : rowPerm;
+  if (j < 0 || j >= a.length || i === j) return;
+  if (moveMode === 'insert') { const [x] = a.splice(i, 1); a.splice(j, 0, x); }
+  else { [a[i], a[j]] = [a[j], a[i]]; if (moveMode === 'carry') [perm[i], perm[j]] = [perm[j], perm[i]]; }
+  renderBoard(); document.querySelector(`.axis[data-ax="${ax}"][data-i="${j}"]`)?.focus();
+}
+let drag = null;
+document.addEventListener('pointerdown', e => { const a = e.target.closest('.axis'); if (a) { drag = { ax: a.dataset.ax, i: +a.dataset.i }; e.preventDefault(); } });
+document.addEventListener('pointerup', e => {
+  if (!drag) return;
+  const t = document.elementsFromPoint(e.clientX, e.clientY).find(x => x.classList?.contains('axis') && x.dataset.ax === drag.ax);
+  if (t) move(drag.ax, drag.i, +t.dataset.i);
+  drag = null;
+});
+document.addEventListener('keydown', e => {
+  const a = document.activeElement?.closest?.('.axis');
+  if (a && !$('tx').classList.contains('on')) {
+    const d = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key];
+    if (d) { move(a.dataset.ax, +a.dataset.i, +a.dataset.i + d); e.preventDefault(); }
+  }
+});
+let sel = 0;
+function renderTx() {
+  $('cards').innerHTML = coords.map(([r, c], k) => {
+    const coord = notation === 'words' ? `<div class="coord word">${r}<small>${c}</small></div>`
+      : `<div class="coord">${isName(r) ? `<span style="font:700 11px Arial">${r}</span>` : NUM.indexOf(r) + 1}<small>${GLYPH[c]}</small></div>`;
+    return `<div class="card">${coord}${entryMode === 'field' ? '' : `<div class="box ${entry[k] ? 'filled' : ''} ${k === sel ? 'sel' : ''}" data-k="${k}">${entry[k] === ' ' ? '␣' : entry[k]}</div>`}</div>`;
+  }).join('');
+  $('field').style.display = entryMode === 'field' ? 'block' : 'none';
+  $('progress').textContent = `${entry.filter(Boolean).length} / ${coords.length}`;
+}
+$('cards').addEventListener('click', e => { const b = e.target.closest('.box'); if (b) { sel = +b.dataset.k; renderTx(); } });
+document.addEventListener('keydown', e => {
+  if (!$('tx').classList.contains('on') || entryMode === 'field') return;
+  if (/^[a-z]$/i.test(e.key) || e.key === ' ') {
+    entry[sel] = e.key === ' ' ? ' ' : e.key.toUpperCase();
+    if (entryMode === 'auto') sel = Math.min(coords.length - 1, sel + 1);
+    renderTx(); e.preventDefault();
+  } else if (e.key === 'Backspace') { entry[sel] = ''; renderTx(); }
+});
+$('field').addEventListener('input', () => { const v = $('field').value.toUpperCase(); for (let k = 0; k < coords.length; k++) entry[k] = v[k] || ''; $('progress').textContent = `${entry.filter(Boolean).length} / ${coords.length}`; });
+$('open').onclick = () => { $('tx').classList.add('on'); renderTx(); };
+$('close').onclick = () => $('tx').classList.remove('on');
+renderBoard();
+const H = { text: await sha(phrase), rows: await sha(rowTarget.join()), cols: await sha(colTarget.join()) };
+onSubmit(() => entry.some(Boolean) && !$('tx').classList.contains('on'), async () => {
+  const checks = [await sha(entry.join('')) === H.text, await sha(rows.join()) === H.rows, await sha(cols.join()) === H.cols];
+  const names = ['transmission text', 'row order', 'column order'];
+  return { pct: Math.round(100 * checks.filter(Boolean).length / 3), notes: checks.map((ok, i) => `${ok ? '✓' : '✗'} ${names[i]}`) };
+});
+// (for the test log only; not shown) which variant this seed produced
+document.body.dataset.variant = [rowKey, colKey, moveMode, notation, entryMode, `${RN}x${C2}`].join('/');
+if (params.get('truth') === '1') window.__truth = { rows: RN, cols: C2, coords: coords.length, rowLabels: rows.slice(), colLabels: cols.slice(), phrase };
+</script>
+</body>
+</html>

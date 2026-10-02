@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>G9 variant Z: The Tunnels (oversized board, pan + zoom)</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  /* the board viewport: its own rect, clear of the clue panel and the controls (nothing overlaps the tiles) */
+  #view { position:absolute; left:350px; right:30px; top:58px; bottom:116px; overflow:hidden; cursor:grab; border:1px solid var(--line); border-radius:10px; background:#0d0809; }
+  #view.drag { cursor:grabbing; }
+  #world { position:absolute; left:0; top:0; transform-origin:0 0; }
+  #grid { display:grid; }
+  .c { position:relative; }
+  .c svg { display:block; width:100%; height:100%; }
+  .c.start::after { content:''; position:absolute; inset:0; box-shadow:0 0 0 3px var(--cyan) inset, 0 0 16px rgba(79,200,232,.65) inset; pointer-events:none; border-radius:inherit; }
+  .c.lit::after { content:''; position:absolute; inset:0; box-shadow:0 0 18px 4px rgba(255,214,120,.55) inset; background:rgba(255,214,120,.10); pointer-events:none; border-radius:inherit; }
+  .c.mark::before { content:''; position:absolute; left:50%; top:50%; width:34%; height:34%; transform:translate(-50%,-50%); border-radius:50%; background:rgba(230,30,60,.85); box-shadow:0 0 0 2px #fff4; pointer-events:none; z-index:2; }
+  .c.exitmark::before { background:rgba(79,200,232,.9); }
+  .tiles .c { border-radius:6px; overflow:hidden; }
+  .cards .c { border-radius:8px; overflow:hidden; }
+  #hud { position:absolute; left:350px; right:30px; bottom:72px; z-index:5; display:flex; gap:8px; align-items:center; }
+  #hud .pill { background:rgba(12,8,9,.9); padding:7px 14px; }
+  #zoomout { margin-left:auto; font:600 11px Arial; letter-spacing:.14em; color:var(--tan); }
+</style>
+</head>
+<body>
+<div id="view"><div id="world"><div id="grid"></div></div></div>
+<div id="hud">
+  <button class="pill" id="fit">FIT BOARD (HOME)</button>
+  <button class="pill" id="zin">ZOOM +</button>
+  <button class="pill" id="zoutb">ZOOM −</button>
+  <div id="zoomout">—</div>
+</div>
+<script type="module">
+// Oversized tunnels board: the whole maze does NOT fit on screen at the opening zoom, exactly like the inspected
+// Challenge3 engine (pan by dragging, wheel/pinch zoom, Home to fit, fit/zoom controls). The solver has to fit or pan
+// the board before it can read it. URL params (unspecified = seeded random):
+//   style=walls|tiles|cards     tile artwork (same three looks as game9m)
+//   rows/cols/n                 size (default 16x16 — deliberately bigger than the viewport)
+//   tile=N                      world pixels per tile (default 72)
+//   zoom=N                      opening scale (default 1 = heavily cropped); fit = whole board visible
+//   open=start|corner|fit       opening camera: centred on the start tile, the top-left corner, or already fitted
+//   exits=1..4  lit=1  loops=0..3  start=bottom|any   (as game9m)
+//   seed, truth=1
+import { R, pick, shuffle, sha, $, frame, onSubmit, params } from './common.js';
+import { makeMaze } from './maze_gen.js';
+const P = k => params.get(k);
+const STYLE = P('style') || pick(['walls', 'tiles', 'cards']);
+const NR = Number(P('rows') || P('n')) || 16;
+const NC = Number(P('cols') || P('n')) || 16;
+const T = Number(P('tile')) || 72;
+const OPEN = P('open') || pick(['start', 'start', 'corner']);
+const LIT = P('lit') === '1';
+const M = makeMaze({ rows: NR, cols: NC, exits: Number(P('exits') || pick([1, 2, 3])), lit: LIT,
+  loops: Number(P('loops') || 0), startMode: P('start') || 'bottom' });
+const { open, start, routeSet } = M;
+
+frame({ code: 'R3 · G9', title: 'The Tunnels',
+  clue: 'The map is larger than the screen. Fit it, read it, then reach the top edge. One way out. Walk the space between the walls and mark every tile of your route.' + (LIT ? ' Some tunnels are lit for you.' : ''),
+  hint: 'DRAG TO PAN · WHEEL TO ZOOM · HOME TO FIT · CLICK A TILE TO MARK IT' });
+
+// ---- tile artwork (same three looks as game9m)
+const gap = STYLE === 'walls' ? 0 : 6;
+function tileSvg(r, c) {
+  const o = open[r][c];
+  if (STYLE === 'walls') {
+    const w = 7, seg = { U: 'M0 0 L100 0', D: 'M0 100 L100 100', L: 'M0 0 L0 100', R: 'M100 0 L100 100' };
+    const walls = Object.keys(seg).filter(s => !o.has(s)).map(s => seg[s]).join(' ');
+    return `<svg viewBox="0 0 100 100" preserveAspectRatio="none"><rect width="100" height="100" fill="#140d0f"/><path d="${walls}" stroke="#d8cdb8" stroke-width="${w * 2}" stroke-linecap="square" fill="none"/></svg>`;
+  }
+  const ink = STYLE === 'cards' ? '#17130f' : '#d9c7a8', bg = STYLE === 'cards' ? '#d8cdb8' : '#241719';
+  const e = { U: 'M50 50 L50 0', D: 'M50 50 L50 100', L: 'M50 50 L0 50', R: 'M50 50 L100 50' };
+  const tilt = STYLE === 'cards' ? (R() * 12 - 6).toFixed(1) : 0;
+  let dots = '';
+  if (STYLE === 'cards') for (let i = 0; i < 14; i++) dots += `<circle cx="${(R() * 100).toFixed(0)}" cy="${(R() * 100).toFixed(0)}" r="${pick([0.8, 1.2, 1.6])}" fill="#17130f" opacity=".35"/>`;
+  const w = STYLE === 'cards' ? 22 : 26;
+  return `<svg viewBox="0 0 100 100"><rect width="100" height="100" fill="${bg}"/>${dots}<g transform="rotate(${tilt} 50 50)"><path d="${[...o].map(s => e[s]).join(' ')}" stroke="${ink}" stroke-width="${w}" stroke-linecap="butt" fill="none"/><circle cx="50" cy="50" r="${w / 2}" fill="${ink}"/></g></svg>`;
+}
+const art = {}; for (let r = 0; r < NR; r++) for (let c = 0; c < NC; c++) art[`${r},${c}`] = tileSvg(r, c);
+const WW = NC * T + (NC - 1) * gap, WH = NR * T + (NR - 1) * gap; // world size in px
+
+const startK = `${start[0]},${start[1]}`;
+const marked = new Set([startK]);
+const topMark = () => [...marked].find(k => k.startsWith('0,') && k !== startK); // the one chosen top-row exit
+
+function build() {
+  $('grid').className = STYLE;
+  $('grid').style.gridTemplateColumns = `repeat(${NC}, ${T}px)`;
+  $('grid').style.gap = gap + 'px';
+  let h = '';
+  for (let r = 0; r < NR; r++) for (let c = 0; c < NC; c++) {
+    const k = `${r},${c}`;
+    h += `<div class="c" data-k="${k}" style="width:${T}px;height:${T}px">${art[k]}</div>`;
+  }
+  $('grid').innerHTML = h;
+  $('world').style.width = WW + 'px'; $('world').style.height = WH + 'px';
+}
+function paint() {
+  const tm = topMark();
+  for (const el of $('grid').children) {
+    const k = el.dataset.k;
+    el.className = 'c' + (k === startK ? ' start' : '') + (M.lit.has(k) ? ' lit' : '')
+      + (marked.has(k) && k !== startK ? ' mark' : '') + (k === tm ? ' exitmark' : '');
+  }
+  $('progress').textContent = `${marked.size} MARKED${tm ? ' · EXIT SET' : ''}`;
+}
+
+// ---- camera: scale + translate, clamped so the board stays partly on screen
+let scale = 1, tx = 0, ty = 0;
+const vw = () => $('view').clientWidth, vh = () => $('view').clientHeight;
+const fitScale = () => Math.min((vw() - 80) / WW, (vh() - 140) / WH);
+function apply() {
+  const minS = Math.min(0.12, fitScale() * 0.6), maxS = 3;
+  scale = Math.max(minS, Math.min(maxS, scale));
+  // clamp: when the board is bigger than the viewport keep it filling the view (no empty gutter); else centre freely
+  const w = WW * scale, h = WH * scale, pad = 40;
+  tx = w >= vw() ? Math.max(Math.min(tx, pad), vw() - w - pad) : Math.max(Math.min(tx, vw() - w - pad), pad);
+  ty = h >= vh() ? Math.max(Math.min(ty, pad), vh() - h - pad) : Math.max(Math.min(ty, vh() - h - pad), pad);
+  $('world').style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+  const fs = fitScale();
+  $('zoomout').textContent = `ZOOM ${Math.round(scale * 100)}%  ·  BOARD ${NC}×${NR}  ·  ${scale <= fs * 1.02 ? 'WHOLE BOARD' : 'PARTIAL VIEW'}`;
+}
+function fit() { scale = fitScale(); tx = (vw() - WW * scale) / 2; ty = (vh() - WH * scale) / 2 + 10; apply(); }
+function centreOn(r, c) { // world point at the viewport centre
+  tx = vw() / 2 - (c * (T + gap) + T / 2) * scale;
+  ty = vh() / 2 - (r * (T + gap) + T / 2) * scale;
+  apply();
+}
+function zoomAt(px, py, f) { // keep the world point under the cursor fixed
+  const wx = (px - tx) / scale, wy = (py - ty) / scale;
+  const before = scale; scale *= f; apply();
+  if (scale !== before) { tx = px - wx * scale; ty = py - wy * scale; apply(); }
+}
+
+build();
+if (OPEN === 'fit') fit();
+else { scale = Number(P('zoom')) || 1; apply(); OPEN === 'corner' ? (tx = 40, ty = 70, apply()) : centreOn(start[0], start[1]); }
+paint();
+
+// drag to pan; a click only marks if the pointer barely moved (panning must not select)
+let down = null;
+$('view').addEventListener('pointerdown', e => { down = { x: e.clientX, y: e.clientY, tx, ty, moved: 0 }; $('view').classList.add('drag'); });
+$('view').addEventListener('pointermove', e => {
+  if (!down) return;
+  const dx = e.clientX - down.x, dy = e.clientY - down.y;
+  down.moved = Math.max(down.moved, Math.abs(dx) + Math.abs(dy));
+  tx = down.tx + dx; ty = down.ty + dy; apply();
+});
+$('view').addEventListener('pointerup', e => {
+  $('view').classList.remove('drag');
+  const wasDrag = down && down.moved > 5; down = null;
+  if (wasDrag) return;
+  const t = e.target.closest('.c'); if (!t) return;
+  const k = t.dataset.k;
+  if (k === startK) return;
+  if (marked.has(k)) marked.delete(k);
+  else {
+    if (k.startsWith('0,')) { const prev = topMark(); if (prev) marked.delete(prev); } // only one top-row exit
+    marked.add(k);
+  }
+  paint();
+});
+$('view').addEventListener('wheel', e => { e.preventDefault(); zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.12 : 1 / 1.12); }, { passive: false });
+addEventListener('keydown', e => {
+  if (e.key === 'Home' || e.key === '0') fit();
+  else if (e.key === '+' || e.key === '=') zoomAt(vw() / 2, vh() / 2, 1.15);
+  else if (e.key === '-' || e.key === '_') zoomAt(vw() / 2, vh() / 2, 1 / 1.15);
+  else if (e.key === 's' || e.key === 'S') centreOn(start[0], start[1]);
+  else return;
+  e.preventDefault();
+});
+addEventListener('resize', apply);
+$('fit').onclick = fit;
+$('zin').onclick = () => zoomAt(vw() / 2, vh() / 2, 1.2);
+$('zoutb').onclick = () => zoomAt(vw() / 2, vh() / 2, 1 / 1.2);
+
+if (P('truth') === '1') window.__truth = M.truth({ style: STYLE, tile: T, open_mode: OPEN, world: [WW, WH] });
+
+// grading: every route tile marked, nothing extra. Continue needs a top-edge cell, as the real engine does.
+const target = await sha([...routeSet].sort().join('|'));
+onSubmit(() => !!topMark(), async () => {
+  const ok = await sha([...marked].sort().join('|')) === target;
+  let hit = 0; for (const k of marked) if (routeSet.has(k)) hit++;
+  const extra = marked.size - hit;
+  return { pct: ok ? 100 : Math.round(100 * Math.max(0, hit - extra) / routeSet.size),
+    notes: [ok ? 'Route complete.' : `${hit} of ${routeSet.size} route tiles marked, ${extra} extra.`] };
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>G8 variant: The Message Between</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  #board { display:grid; gap:6px; }
+  .cell { width:58px; height:58px; display:flex; align-items:center; justify-content:center; background:#1c1214; border:1px solid var(--line); font:700 26px Georgia; }
+  .axis { width:58px; height:58px; display:flex; flex-direction:column; align-items:center; justify-content:center; border:1.5px solid rgba(94,200,216,.55); border-radius:9px; background:#0f1a1c; color:var(--cyan); cursor:grab; font:700 22px Georgia; }
+  .axis small { font:600 9px/1 Arial; letter-spacing:.08em; margin-top:2px; }
+  .axis:focus { outline:2px solid var(--red); }
+  .corner { width:58px; height:58px; }
+  #tx { position:absolute; inset:40px 30px 70px 350px; background:#140c0e; border:1px solid var(--line); border-radius:14px; display:none; flex-direction:column; align-items:center; justify-content:center; gap:14px; z-index:10; }
+  #tx.on { display:flex; }
+  #tx h2 { margin:0; font:600 14px Arial; letter-spacing:.2em; }
+  #cards { display:flex; flex-wrap:wrap; gap:10px 12px; justify-content:center; max-width:760px; }
+  .card { display:flex; flex-direction:column; align-items:center; gap:4px; }
+  .coord { width:56px; height:62px; border:1px solid var(--line); border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; font:700 18px Georgia; background:#1c1214; }
+  .coord small { font:600 16px Georgia; color:var(--cyan); }
+  .box { width:40px; height:40px; border:1.5px dashed rgba(217,185,138,.6); border-radius:6px; display:flex; align-items:center; justify-content:center; font:700 22px Georgia; cursor:text; }
+  .box.filled { background:var(--tan); color:#1a0f08; border-style:solid; }
+  .box.sel { outline:2px solid var(--red); }
+  #open { margin-top:6px; }
+</style>
+</head>
+<body>
+<main id="stage"><div id="board"></div><button class="pill" id="open">OPEN THE TRANSMISSION</button></main>
+<div id="tx"><h2>THE TRANSMISSION</h2><div id="cards"></div><button class="pill" id="close">CLOSE THE TRANSMISSION</button></div>
+<script type="module">
+import { R, pick, shuffle, sha, $, frame, onSubmit } from './common.js';
+const NUM = ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE'];
+const DANGERS = { FIRE: '▲', WAVE: '≈', STORM: 'ϟ', ICE: '✱', SAND: '∴', SMOKE: '◎' };
+const PHRASES = ['LET HIM GO', 'NOT TWO', 'TRUST ME', 'SURVIVE', 'FLYING AT LAST', 'THREE SPLASHES', 'YOU EARNED WATER', 'GO SAVE SOME LIVES'];
+const [RN, CN] = pick([[3, 3], [3, 4], [4, 4], [4, 5]]);
+const phrase = pick(PHRASES.filter(p => p.replace(/ /g, '').length + (p.includes(' ') ? 1 : 0) <= RN * CN));
+const rowNames = NUM.slice(0, RN);
+const colNames = shuffle(Object.keys(DANGERS)).slice(0, CN);
+// target orders as the clue states them (rows may be asked in a non-numeric order too)
+const rowTarget = R() < 0.3 ? shuffle(rowNames.slice()) : rowNames.slice();
+const colTarget = colNames.slice();
+// physical seats: letters stay put; labels move over them
+const seats = Array.from({ length: RN }, () => Array(CN).fill(''));
+const free = shuffle([...Array(RN * CN).keys()]);
+const coords = []; let blank = null;
+for (const ch of phrase) {
+  let seat;
+  if (ch === ' ') { if (blank === null) blank = free.pop(); seat = blank; }
+  else { seat = free.pop(); seats[Math.floor(seat / CN)][seat % CN] = ch; }
+  coords.push([rowTarget[Math.floor(seat / CN)], colTarget[seat % CN]]);
+}
+const FILL = 'ABCDEFGHIKLMNOPRSTUVWY';
+for (const s of free) seats[Math.floor(s / CN)][s % CN] = FILL[Math.floor(R() * FILL.length)];
+// starting (wrong) label orders
+let rows = shuffle(rowTarget.slice()), cols = shuffle(colTarget.slice());
+if (rows.join() === rowTarget.join() && RN > 1) rows.reverse();
+if (cols.join() === colTarget.join()) cols.reverse();
+
+frame({ code: 'R3 · G8', title: 'The Message Between',
+  clue: `Put the row markers ${rowTarget.join(', ')} from top to bottom. Put ${colTarget.join(', ')} from left to right. Open the transmission. Read each coordinate at its intersection. Fill all ${coords.length} boxes${phrase.includes(' ') ? ', including the space' : ''}.`,
+  hint: 'CLICK + DRAG MARKERS TO SWAP · ARROW KEYS MOVE A FOCUSED MARKER' });
+const entry = Array(coords.length).fill('');
+function renderBoard() {
+  const b = $('board'); b.style.gridTemplateColumns = `repeat(${CN + 1}, 58px)`;
+  let h = '<div class="corner"></div>' + cols.map((c, i) => `<div class="axis" tabindex="0" data-ax="c" data-i="${i}">${DANGERS[c]}<small>${c}</small></div>`).join('');
+  for (let r = 0; r < RN; r++) h += `<div class="axis" tabindex="0" data-ax="r" data-i="${r}">${NUM.indexOf(rows[r]) + 1}<small>${rows[r]}</small></div>` + seats[r].map(ch => `<div class="cell">${ch}</div>`).join('');
+  b.innerHTML = h;
+  $('progress').textContent = `${entry.filter(Boolean).length} / ${coords.length}`;
+}
+const swap = (ax, i, j) => { const a = ax === 'c' ? cols : rows; if (j < 0 || j >= a.length) return; [a[i], a[j]] = [a[j], a[i]]; renderBoard(); document.querySelector(`.axis[data-ax="${ax}"][data-i="${j}"]`)?.focus(); };
+let drag = null;
+document.addEventListener('pointerdown', e => { const a = e.target.closest('.axis'); if (a) { drag = { ax: a.dataset.ax, i: +a.dataset.i }; e.preventDefault(); } });
+document.addEventListener('pointerup', e => {
+  if (!drag) return;
+  const t = document.elementsFromPoint(e.clientX, e.clientY).find(x => x.classList?.contains('axis') && x.dataset.ax === drag.ax);
+  if (t && +t.dataset.i !== drag.i) swap(drag.ax, drag.i, +t.dataset.i);
+  else if (!t) { // dropped past the ends: move to the nearest end
+    const els = [...document.querySelectorAll(`.axis[data-ax="${drag.ax}"]`)];
+    const last = els[els.length - 1].getBoundingClientRect(), first = els[0].getBoundingClientRect();
+    const past = drag.ax === 'c' ? (e.clientX > last.right ? els.length - 1 : e.clientX < first.left ? 0 : -1) : (e.clientY > last.bottom ? els.length - 1 : e.clientY < first.top ? 0 : -1);
+    if (past >= 0 && past !== drag.i) { const a = drag.ax === 'c' ? cols : rows; const [x] = a.splice(drag.i, 1); a.splice(past, 0, x); renderBoard(); }
+  }
+  drag = null;
+});
+document.addEventListener('keydown', e => {
+  const a = document.activeElement?.closest?.('.axis');
+  if (a && !$('tx').classList.contains('on')) {
+    const d = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key];
+    if (d) { swap(a.dataset.ax, +a.dataset.i, +a.dataset.i + d); e.preventDefault(); }
+  }
+});
+// transmission: coordinate cards + boxes (click a box and type; it advances)
+let sel = 0;
+function renderTx() {
+  $('cards').innerHTML = coords.map(([r, c], k) => `<div class="card"><div class="coord">${NUM.indexOf(r) + 1}<small>${DANGERS[c]}</small></div><div class="box ${entry[k] ? 'filled' : ''} ${k === sel ? 'sel' : ''}" data-k="${k}">${entry[k] === ' ' ? '␣' : entry[k]}</div></div>`).join('');
+  $('progress').textContent = `${entry.filter(Boolean).length} / ${coords.length}`;
+}
+$('cards').addEventListener('click', e => { const b = e.target.closest('.box'); if (b) { sel = +b.dataset.k; renderTx(); } });
+document.addEventListener('keydown', e => {
+  if (!$('tx').classList.contains('on')) return;
+  if (/^[a-z]$/i.test(e.key) || e.key === ' ') { entry[sel] = e.key === ' ' ? ' ' : e.key.toUpperCase(); sel = Math.min(coords.length - 1, sel + 1); renderTx(); e.preventDefault(); }
+  else if (e.key === 'Backspace') { entry[sel] = ''; renderTx(); }
+});
+$('open').onclick = () => { $('tx').classList.add('on'); renderTx(); };
+$('close').onclick = () => $('tx').classList.remove('on');
+renderBoard();
+const H = { text: await sha(phrase), rows: await sha(rowTarget.join()), cols: await sha(colTarget.join()) };
+onSubmit(() => entry.some(Boolean) && !$('tx').classList.contains('on'), async () => {
+  const checks = [await sha(entry.join('')) === H.text, await sha(rows.join()) === H.rows, await sha(cols.join()) === H.cols];
+  const names = ['transmission text', 'row order', 'column order'];
+  return { pct: Math.round(100 * checks.filter(Boolean).length / 3), notes: checks.map((ok, i) => `${ok ? '✓' : '✗'} ${names[i]}`) };
+});
+</script>
+</body>
+</html>

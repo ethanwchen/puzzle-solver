@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>R3 · Practice — The Roster (scroll sim)</title>
+<!-- Local practice page for testing that the Sidekick's pins follow a scrolling page. Answer checked by hash only. -->
+<style>
+  body { margin:0; background:#0b0708; color:#efe6dc; font:16px/1.6 Georgia, serif; }
+  main { width:760px; margin:0 auto; padding:40px 0 1400px; }
+  h1 { font:300 40px/1.1 Georgia, serif; color:#e0245e; }
+  .q { font-size:22px; margin:18px 0; }
+  input { width:320px; background:#1a1213; border:1.5px solid #d9b98a; color:#efe6dc; border-radius:10px; padding:10px 14px; font:700 22px Georgia, serif; text-align:center; }
+  button { margin-left:10px; background:rgba(224,36,94,.2); border:1px solid #e0245e; color:#fff; border-radius:999px; padding:10px 18px; letter-spacing:.1em; }
+  #fb { margin-top:10px; min-height:24px; } .good { color:#22c55e; } .bad { color:#e0245e; }
+  .entry { border-top:1px solid rgba(255,255,255,.1); padding:14px 0; color:#cfc4ba; }
+</style>
+</head>
+<body>
+<main>
+  <h1>The Roster</h1>
+  <p>PRACTICE. One of the players once sat in Congress and was talked about as a future president. He did not make it out of the war zone.</p>
+  <div class="q">Type his surname.</div>
+  <div><input id="ans" placeholder="surname" autocomplete="off"><button id="chk">CHECK</button></div>
+  <div id="fb"></div>
+  <div id="list"></div>
+</main>
+<script>
+const H = '205db3ec72f244baa74e0b5fd43a9195180979d8f9f0ff52928053adb3c9ccdd';
+const sha = async s => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map(b => b.toString(16).padStart(2, '0')).join('');
+document.getElementById('list').innerHTML = Array.from({ length: 30 }, (_, i) => `<div class="entry">Entry ${i + 1}: a page of the roster, scroll for more.</div>`).join('');
+const check = async () => { const ok = await sha(document.getElementById('ans').value.toUpperCase().replace(/[^A-Z]/g, '')) === H;
+  document.getElementById('fb').textContent = ok ? 'CORRECT' : 'NO. LOOK AGAIN'; document.getElementById('fb').className = ok ? 'good' : 'bad'; };
+document.getElementById('chk').onclick = check;
+document.getElementById('ans').onkeydown = e => { if (e.key === 'Enter') check(); };
+</script>
+</body>
+</html>

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>G9 variant D: The Tunnels (fragment cards + key card)</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  #grid { display:grid; gap:7px; }
+  .c { position:relative; cursor:pointer; border-radius:8px; overflow:hidden; box-shadow:0 2px 6px #0008; }
+  .c svg { display:block; width:100%; height:100%; }
+  .c.start::after { content:''; position:absolute; inset:0; box-shadow:0 0 0 3px var(--cyan) inset, 0 0 18px rgba(79,200,232,.75) inset; pointer-events:none; }
+  .c.lit::after { content:''; position:absolute; inset:0; box-shadow:0 0 18px 4px rgba(255,214,120,.6) inset; pointer-events:none; }
+  .c.mark::before { content:''; position:absolute; inset:0; background:rgba(200,20,45,.38); box-shadow:0 0 0 3px rgba(230,30,60,.95) inset; pointer-events:none; z-index:2; }
+  #keybtn { position:absolute; right:28px; top:60px; z-index:4; }
+  #key { position:absolute; left:24px; bottom:70px; width:420px; background:#140c0e; border:1px solid var(--line); border-radius:12px; padding:10px; display:none; z-index:6; }
+  #key.on { display:block; }
+  #banner { margin-bottom:12px; font:600 12px Arial; letter-spacing:.24em; color:var(--tan); text-align:center; }
+</style>
+</head>
+<body>
+<main id="stage"><div><div id="banner">REACH THE TOP EDGE · ONE WAY OUT</div><div id="grid"></div></div></main>
+<button class="pill" id="keybtn">KEY / VIEW</button>
+<div id="key"></div>
+<script type="module">
+// Each card shows one FRAGMENT; the key card says which move each fragment encodes. Near-miss fragments (a stroke
+// missing) encode nothing. URL params: set=arcs|letters|runes, rows/cols/n, nearmiss=0..0.5, lit=1, seed, truth=1
+import { R, pick, shuffle, sha, $, frame, onSubmit, params } from './common.js';
+const P = k => params.get(k);
+const NR = Number(P('rows') || P('n')) || 7, NC = Number(P('cols') || P('n')) || 5;
+const NEAR = P('nearmiss') == null ? 0.3 : Number(P('nearmiss'));
+const LIT = P('lit') === '1';
+const SET = P('set') || pick(['arcs', 'letters', 'runes']);
+const ink = 'stroke="#17130f" stroke-width="8" stroke-linecap="round" fill="none"';
+// four move fragments + a near-miss twin for each (one stroke missing)
+const GLYPHS = {
+  arcs: [['M30 78 L30 40 Q50 18 70 40 L70 78', 'M30 78 L30 40 Q50 18 70 40'], ['M22 30 L50 72 L78 30 M50 72 L50 86', 'M22 30 L50 72 L78 30'],
+         ['M78 26 L30 50 L78 74 M44 50 L80 50', 'M78 26 L30 50 L78 74'], ['M60 50 L84 50 M24 50 A18 18 0 1 0 60 50 A18 18 0 1 0 24 50', 'M24 50 A18 18 0 1 0 60 50 A18 18 0 1 0 24 50']],
+  letters: [['M28 80 L50 22 L72 80 M38 58 L62 58', 'M28 80 L50 22 L72 80'], ['M28 22 L28 80 L72 80 M28 50 L58 50', 'M28 22 L28 80 L72 80'],
+            ['M72 22 L28 22 L28 80 L72 80 M28 50 L60 50', 'M72 22 L28 22 L28 80 L72 80'], ['M28 80 L28 22 L72 80 L72 22 M50 50 L50 50', 'M28 80 L28 22 L72 80']],
+  runes: [['M50 20 L50 82 M50 32 L74 50', 'M50 20 L50 82'], ['M34 20 L34 82 M34 22 L66 46 L34 64', 'M34 20 L34 82 M34 22 L66 46'],
+          ['M30 20 L70 82 M70 20 L30 82 M50 20 L50 40', 'M30 20 L70 82 M70 20 L30 82'], ['M30 80 L50 22 L70 80 M36 62 L64 62 M50 22 L50 10', 'M30 80 L50 22 L70 80 M36 62 L64 62']],
+}[SET];
+const MOVES = shuffle(['up', 'down', 'left', 'right']);
+const D = { up: [-1, 0], down: [1, 0], left: [0, -1], right: [0, 1] };
+// route: self-avoiding walk from the bottom row to the top, mostly up
+let route;
+for (let t = 0; t < 800; t++) {
+  let r = NR - 1, c = Math.floor(R() * NC); const seen = new Set([`${r},${c}`]); route = [[r, c]]; let ok = true;
+  while (r > 0) { const opts = [['up', 3], ['left', 1], ['right', 1]].flatMap(([d, w]) => Array(w).fill(d)).filter(d => { const nr = r + D[d][0], nc = c + D[d][1]; return nc >= 0 && nc < NC && !seen.has(`${nr},${nc}`); });
+    if (!opts.length) { ok = false; break; } const d = pick(opts); r += D[d][0]; c += D[d][1]; seen.add(`${r},${c}`); route.push([r, c]); }
+  if (ok && route.length >= NR + 2 && route.length <= 2 * NR + 2) break;
+}
+const onRoute = new Set(route.map(([r, c]) => `${r},${c}`));
+const cell = {}; // "r,c" -> glyph name "g0".."g3" (moves) or "n0".."n3" (near misses)
+const gFor = mv => 'g' + MOVES.indexOf(mv);
+route.forEach(([r, c], k) => { const nx = route[k + 1]; const mv = nx ? Object.keys(D).find(d => D[d][0] === nx[0] - r && D[d][1] === nx[1] - c) : 'up'; cell[`${r},${c}`] = gFor(mv); });
+for (let r = 0; r < NR; r++) for (let c = 0; c < NC; c++) if (!cell[`${r},${c}`]) cell[`${r},${c}`] = R() < NEAR ? 'n' + Math.floor(R() * 4) : 'g' + Math.floor(R() * 4);
+const start = route[0];
+const lit = new Set();
+if (LIT) for (let r = NR - 2; r >= 0; r--) if (!onRoute.has(`${r},${start[1]}`)) lit.add(`${r},${start[1]}`);
+const svgOf = (name, tilt, dots) => { const i = +name[1], d = GLYPHS[i][name[0] === 'g' ? 0 : 1];
+  return `<svg viewBox="0 0 100 100"><rect width="100" height="100" fill="#d8cdb8"/>${dots}<g transform="rotate(${tilt} 50 50)"><path d="${d}" ${ink}/></g></svg>`; };
+const art = {};
+for (let r = 0; r < NR; r++) for (let c = 0; c < NC; c++) { let dots = '';
+  for (let i = 0; i < 14; i++) dots += `<circle cx="${(R() * 100).toFixed(0)}" cy="${(R() * 100).toFixed(0)}" r="${pick([0.8, 1.2, 1.6])}" fill="#17130f" opacity=".35"/>`;
+  art[`${r},${c}`] = svgOf(cell[`${r},${c}`], (R() * 12 - 6).toFixed(1), dots); }
+frame({ code: 'R3 · G9', title: 'The Tunnels', clue: 'Each tile shows one fragment. The key card says which move each fragment encodes. Follow them from the glowing tile and mark every tile of the way.' + (LIT ? ' Some tunnels are lit for you.' : ''), hint: 'CLICK A TILE TO MARK IT · KEY / VIEW FOR THE KEY CARD' });
+const T = Math.max(46, Math.min(86, Math.floor(600 / Math.max(NR, NC))));
+const marked = new Set([`${start[0]},${start[1]}`]);
+function render() {
+  $('grid').style.gridTemplateColumns = `repeat(${NC}, ${T}px)`;
+  let h = '';
+  for (let r = 0; r < NR; r++) for (let c = 0; c < NC; c++) { const k = `${r},${c}`, isS = k === `${start[0]},${start[1]}`;
+    h += `<div class="c ${isS ? 'start' : ''} ${lit.has(k) && !marked.has(k) ? 'lit' : ''} ${marked.has(k) && !isS ? 'mark' : ''}" data-k="${k}" style="width:${T}px;height:${T}px">${art[k]}</div>`; }
+  $('grid').innerHTML = h; $('progress').textContent = `${marked.size} MARKED`;
+}
+$('grid').addEventListener('click', e => { const t = e.target.closest('.c'); if (!t) return; const k = t.dataset.k; if (k === `${start[0]},${start[1]}`) return; marked.has(k) ? marked.delete(k) : marked.add(k); render(); });
+// the key card: an image (no text symbols to OCR as moves except the labels under each fragment)
+$('key').innerHTML = `<svg viewBox="0 0 620 210" width="400"><rect width="100%" height="100%" fill="#120d0e"/><text x="20" y="32" font-size="17" fill="#e9e3d3">Key: the four moves a fragment can encode</text>` +
+  [0, 1, 2, 3].map(i => `<g transform="translate(${20 + i * 150},50)"><rect width="100" height="100" rx="8" fill="#d8cdb8"/><svg width="100" height="100" viewBox="0 0 100 100"><path d="${GLYPHS[i][0]}" ${ink}/></svg><text x="50" y="130" font-size="20" text-anchor="middle" fill="#e9e3d3">${MOVES[i]}</text></g>`).join('') + '</svg>';
+$('keybtn').onclick = () => $('key').classList.toggle('on');
+if (P('truth') === '1') window.__truth = { rows: NR, cols: NC, set: SET, start: [start[0] + 1, start[1] + 1], route: route.map(([r, c]) => [r + 1, c + 1]),
+  grid: Array.from({ length: NR }, (_, r) => Array.from({ length: NC }, (_, c) => cell[`${r},${c}`]).join(' ')), moves: Object.fromEntries(MOVES.map((m, i) => ['g' + i, m])) };
+render();
+const target = await sha([...onRoute].sort().join('|'));
+onSubmit(() => marked.size > 1, async () => { const ok = await sha([...marked].sort().join('|')) === target; let hit = 0; for (const k of marked) if (onRoute.has(k)) hit++;
+  return { pct: ok ? 100 : Math.round(100 * Math.max(0, hit - (marked.size - hit)) / onRoute.size), notes: [ok ? 'Route complete.' : `${hit} of ${onRoute.size} route tiles marked, ${marked.size - hit} extra.`] }; });
+</script>
+</body>
+</html>

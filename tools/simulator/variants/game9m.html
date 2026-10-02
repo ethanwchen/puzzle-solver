@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>G9 variant M: The Tunnels (walk between the walls)</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  #board { position:relative; }
+  #grid { display:grid; }
+  .c { position:relative; cursor:pointer; }
+  .c svg { display:block; width:100%; height:100%; }
+  .c.start::after { content:''; position:absolute; inset:0; box-shadow:0 0 0 3px var(--cyan) inset, 0 0 16px rgba(79,200,232,.65) inset; pointer-events:none; border-radius:inherit; }
+  .c.lit::after { content:''; position:absolute; inset:0; box-shadow:0 0 18px 4px rgba(255,214,120,.55) inset; background:rgba(255,214,120,.10); pointer-events:none; border-radius:inherit; }
+  .c.mark::before { content:''; position:absolute; left:50%; top:50%; width:34%; height:34%; transform:translate(-50%,-50%); border-radius:50%; background:rgba(230,30,60,.85); box-shadow:0 0 0 2px #fff4; pointer-events:none; z-index:2; }
+  .tiles .c { border-radius:6px; overflow:hidden; }
+  .cards .c { border-radius:8px; overflow:hidden; }
+  #out { position:absolute; font:600 11px Arial; letter-spacing:.2em; color:var(--tan); }
+</style>
+</head>
+<body>
+<main id="stage"><div id="board"><div id="grid"></div></div></main>
+<script type="module">
+// "Walk the space between the walls": maze-style tunnels. URL params (unspecified = seeded random):
+//   style=walls|tiles|cards     walls: one drawn maze, thin walls on cell borders; tiles: separate dark rock tiles with
+//                               lit corridors to each open side; cards: cream cards with dark corridors (drill look,
+//                               small tilt + speckle)
+//   rows/cols/n                 size (default 7x5)
+//   exits=1..4                  openings drawn on the top edge; only one is reachable ("one way out")
+//   lit=1                       a glowing decoy corridor from the start into a dead end ("they light it for you")
+//   loops=0..3                  extra openings (cycles): the route is then the SHORTEST way out
+//   start=bottom|any            glowing start tile on the bottom row, or anywhere
+//   seed, truth=1
+import { R, pick, shuffle, sha, $, frame, onSubmit, params } from './common.js';
+const P = k => params.get(k);
+const STYLE = P('style') || pick(['walls', 'tiles', 'cards']);
+const NR = Number(P('rows') || P('n')) || 7;
+const NC = Number(P('cols') || P('n')) || 5;
+const NEX = Math.min(NC, Number(P('exits') || pick([1, 2, 3])));
+const LIT = P('lit') === '1';
+const LOOPS = Number(P('loops') || 0);
+const STARTMODE = P('start') || 'bottom';
+const D = { U: [-1, 0], D: [1, 0], L: [0, -1], R: [0, 1] }, OPP = { U: 'D', D: 'U', L: 'R', R: 'L' };
+const id = (r, c) => r * NC + c, inb = (r, c) => r >= 0 && r < NR && c >= 0 && c < NC;
+// open[r][c] = set of open sides
+const open = Array.from({ length: NR }, () => Array.from({ length: NC }, () => new Set()));
+const link = (r, c, s) => { const [dr, dc] = D[s]; open[r][c].add(s); if (inb(r + dr, c + dc)) open[r + dr][c + dc].add(OPP[s]); };
+const unlink = (r, c, s) => { const [dr, dc] = D[s]; open[r][c].delete(s); if (inb(r + dr, c + dc)) open[r + dr][c + dc].delete(OPP[s]); };
+// perfect maze (randomized DFS)
+{ const seen = new Set([0]); const st = [[0, 0]];
+  while (st.length) { const [r, c] = st[st.length - 1];
+    const nb = shuffle(Object.keys(D)).filter(s => { const [dr, dc] = D[s]; return inb(r + dr, c + dc) && !seen.has(id(r + dr, c + dc)); });
+    if (!nb.length) { st.pop(); continue; }
+    const s = nb[0], [dr, dc] = D[s]; link(r, c, s); seen.add(id(r + dr, c + dc)); st.push([r + dr, c + dc]); } }
+const neighbours = (r, c) => [...open[r][c]].map(s => [r + D[s][0], c + D[s][1]]).filter(([a, b]) => inb(a, b));
+function bfs(sr, sc) { const prev = new Map([[id(sr, sc), null]]); const q = [[sr, sc]];
+  while (q.length) { const [r, c] = q.shift(); for (const [a, b] of neighbours(r, c)) if (!prev.has(id(a, b))) { prev.set(id(a, b), [r, c]); q.push([a, b]); } }
+  return prev; }
+const pathTo = (prev, r, c) => { const p = []; let cur = [r, c]; while (cur) { p.push(cur); cur = prev.get(id(cur[0], cur[1])); } return p.reverse(); };
+const start = STARTMODE === 'any' ? [Math.floor(NR / 2 + R() * NR / 2), Math.floor(R() * NC)] : [NR - 1, Math.floor(R() * NC)];
+// exits: one true exit, decoys cut off from the start's component
+let prev = bfs(...start);
+const topCells = shuffle([...Array(NC).keys()]);
+const exitC = topCells[0];
+const truePath = pathTo(prev, 0, exitC);
+const onTrue = new Set(truePath.map(([r, c]) => id(r, c)));
+const decoys = topCells.slice(1).filter(c => !onTrue.has(id(0, c))).slice(0, NEX - 1); // a decoy exit can't sit on the route
+for (let pass = 0; pass < 12; pass++) for (const dc of decoys) { // cut edges on start→decoy that the true path doesn't use (repeat: loops)
+  const pv = bfs(...start); if (!pv.has(id(0, dc))) continue;
+  const p = pathTo(pv, 0, dc);
+  for (let i = p.length - 1; i > 0; i--) { const [a, b] = p[i], [x, y] = p[i - 1];
+    if (onTrue.has(id(a, b)) && onTrue.has(id(x, y))) continue;
+    const s = Object.keys(D).find(k => D[k][0] === a - x && D[k][1] === b - y); unlink(x, y, s); break; }
+}
+// loops: extra openings, kept only if the shortest way out stays unique and no decoy exit becomes reachable
+function nShortest(sr, sc, tr, tc) { const dist = new Map([[id(sr, sc), 0]]), cnt = new Map([[id(sr, sc), 1]]); const q = [[sr, sc]];
+  while (q.length) { const [r, c] = q.shift(); const d = dist.get(id(r, c));
+    for (const [a, b] of neighbours(r, c)) { const k = id(a, b);
+      if (!dist.has(k)) { dist.set(k, d + 1); cnt.set(k, cnt.get(id(r, c))); q.push([a, b]); }
+      else if (dist.get(k) === d + 1) cnt.set(k, cnt.get(k) + cnt.get(id(r, c))); } }
+  return cnt.get(id(tr, tc)) || 0; }
+for (let k = 0, added = 0; k < 200 && added < LOOPS * 2; k++) {
+  const r = Math.floor(R() * NR), c = Math.floor(R() * NC), s = pick(['R', 'D']); const [dr, dc] = D[s];
+  if (!inb(r + dr, c + dc) || open[r][c].has(s)) continue;
+  link(r, c, s);
+  const pv = bfs(...start);
+  if (nShortest(...start, 0, exitC) !== 1 || decoys.some(dc => pv.has(id(0, dc)))) unlink(r, c, s); else added++;
+}
+open[0][exitC].add('U'); for (const dc of decoys) open[0][dc].add('U');
+prev = bfs(...start);
+// the route = shortest path from start to the true exit (unique in a perfect maze)
+const route = pathTo(prev, 0, exitC);
+const routeSet = new Set(route.map(([r, c]) => `${r},${c}`));
+const reach = [...Array(NC).keys()].filter(c => open[0][c].has('U') && prev.has(id(0, c)));
+if (reach.length !== 1) console.warn('exits reachable:', reach);
+// lit decoy: from the start along open corridors into the deepest dead end off the route
+const lit = new Set();
+if (LIT) { // a believable corridor: a dead end reached from the start, lit only where it leaves the true route, about route-length
+  const cands = [];
+  for (const [k] of prev) { const r = Math.floor(k / NC), c = k % NC; if (routeSet.has(`${r},${c}`)) continue;
+    const p = pathTo(prev, r, c).filter(([a, b]) => !routeSet.has(`${a},${b}`));
+    if (p.length >= 3 && p.length <= Math.max(4, route.length)) cands.push(p); }
+  cands.sort((x, y) => y.length - x.length || x[x.length - 1][0] - y[y.length - 1][0]);
+  const best = cands[Math.floor(R() * Math.min(3, cands.length))];
+  if (best) for (const [r, c] of best) lit.add(`${r},${c}`); }
+frame({ code: 'R3 · G9', title: 'The Tunnels',
+  clue: 'Reach the top edge. One way out. Walk the space between the walls and mark every tile of your route.' + (LIT ? ' Some tunnels are lit for you.' : ''),
+  hint: 'CLICK A TILE TO MARK IT · CLICK AGAIN TO REMOVE' });
+// ---- drawing
+const T = Math.max(44, Math.min(84, Math.floor(600 / Math.max(NR, NC))));
+const marked = new Set([`${start[0]},${start[1]}`]);
+function tileSvg(r, c) {
+  const o = open[r][c];
+  if (STYLE === 'walls') { // floor + wall lines on closed sides
+    const w = 7, seg = { U: `M0 0 L100 0`, D: `M0 100 L100 100`, L: `M0 0 L0 100`, R: `M100 0 L100 100` };
+    const walls = Object.keys(seg).filter(s => !o.has(s)).map(s => seg[s]).join(' ');
+    return `<svg viewBox="0 0 100 100" preserveAspectRatio="none"><rect width="100" height="100" fill="#140d0f"/><path d="${walls}" stroke="#d8cdb8" stroke-width="${w * 2}" stroke-linecap="square" fill="none"/></svg>`;
+  }
+  const ink = STYLE === 'cards' ? '#17130f' : '#d9c7a8', bg = STYLE === 'cards' ? '#d8cdb8' : '#241719';
+  const e = { U: 'M50 50 L50 0', D: 'M50 50 L50 100', L: 'M50 50 L0 50', R: 'M50 50 L100 50' };
+  const tilt = STYLE === 'cards' ? (R() * 12 - 6).toFixed(1) : 0;
+  let dots = '';
+  if (STYLE === 'cards') for (let i = 0; i < 14; i++) dots += `<circle cx="${(R() * 100).toFixed(0)}" cy="${(R() * 100).toFixed(0)}" r="${pick([0.8, 1.2, 1.6])}" fill="#17130f" opacity=".35"/>`;
+  const w = STYLE === 'cards' ? 22 : 26;
+  return `<svg viewBox="0 0 100 100"><rect width="100" height="100" fill="${bg}"/>${dots}<g transform="rotate(${tilt} 50 50)"><path d="${[...o].map(s => e[s]).join(' ')}" stroke="${ink}" stroke-width="${w}" stroke-linecap="butt" fill="none"/><circle cx="50" cy="50" r="${w / 2}" fill="${ink}"/></g></svg>`;
+}
+const cache = {}; for (let r = 0; r < NR; r++) for (let c = 0; c < NC; c++) cache[`${r},${c}`] = tileSvg(r, c);
+function render() {
+  const gap = STYLE === 'walls' ? 0 : 6;
+  $('grid').className = STYLE; $('grid').style.gridTemplateColumns = `repeat(${NC}, ${T}px)`; $('grid').style.gap = gap + 'px';
+  let h = '';
+  for (let r = 0; r < NR; r++) for (let c = 0; c < NC; c++) {
+    const k = `${r},${c}`, isS = k === `${start[0]},${start[1]}`;
+    h += `<div class="c ${isS ? 'start' : ''} ${lit.has(k) ? 'lit' : ''} ${marked.has(k) && !isS ? 'mark' : ''}" data-k="${k}" style="width:${T}px;height:${T}px">${cache[k]}</div>`;
+  }
+  $('grid').innerHTML = h;
+  $('progress').textContent = `${marked.size} MARKED`;
+}
+$('grid').addEventListener('click', e => {
+  const t = e.target.closest('.c'); if (!t) return; const k = t.dataset.k;
+  if (k === `${start[0]},${start[1]}`) return;
+  marked.has(k) ? marked.delete(k) : marked.add(k); render();
+});
+if (P('truth') === '1') window.__truth = { rows: NR, cols: NC, style: STYLE, start: [start[0] + 1, start[1] + 1], route: route.map(([r, c]) => [r + 1, c + 1]),
+  exits: [exitC + 1, ...decoys.map(c => c + 1)], reachable: reach.map(c => c + 1), lit: [...lit].map(k => k.split(',').map(x => +x + 1)),
+  open: open.map(row => row.map(s => [...s].sort().join('')).join(' ')) };
+render();
+const target = await sha([...routeSet].sort().join('|'));
+onSubmit(() => marked.size > 1, async () => {
+  const ok = await sha([...marked].sort().join('|')) === target;
+  let hit = 0; for (const k of marked) if (routeSet.has(k)) hit++;
+  const extra = marked.size - hit;
+  return { pct: ok ? 100 : Math.round(100 * Math.max(0, hit - extra) / routeSet.size), notes: [ok ? 'Route complete.' : `${hit} of ${routeSet.size} route tiles marked, ${extra} extra.`] };
+});
+</script>
+</body>
+</html>

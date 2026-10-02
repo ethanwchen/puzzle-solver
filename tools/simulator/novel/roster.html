@@ -1,0 +1,13 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Novel: The Roll Call</title><link rel="stylesheet" href="../variants/common.css">
+<style>.card{font:italic 17px/1.45 Georgia;max-width:620px;border-left:3px solid var(--red);padding:4px 12px;margin:4px 0}</style></head>
+<body><main id="stage"></main><script type="module">
+import { puzzle } from './novel.js';
+puzzle({ code: 'NOVEL · C', title: 'The Roll Call',
+  clue: 'PRACTICE. Four players, described as the book introduces them. Give each one\'s player number.',
+  hint: 'TYPE EACH PLAYER NUMBER · CONTINUE TO SUBMIT',
+  body: `<div class="card">A. A two-time Olympic decathlon champion from Australia.</div>
+         <div class="card">B. An undefeated master of Brazilian jiujitsu from Santiago, Chile.</div>
+         <div class="card">C. A fourteen-year-old football academy prospect from Manchester.</div>
+         <div class="card">D. A German student at MIT from Hamburg.</div>`,
+  fields: ['player A #', 'player B #', 'player C #', 'player D #'], answers: ['2', '638', '930', '222'] });
+</script></body></html>

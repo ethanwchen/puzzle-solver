@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>G7 variant: The Lost Lineup</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  #eyes { display:grid; gap:26px 30px; }
+  .eye { width:112px; height:112px; border-radius:50%; background:radial-gradient(circle at 50% 50%, #3a2528 0%, #120a0b 70%); border:2px solid rgba(255,255,255,.08); position:relative; cursor:grab; overflow:hidden; }
+  .eye .iris { position:absolute; left:50%; top:50%; width:44px; height:44px; margin:-22px; border-radius:50%; background:radial-gradient(circle, #111 0 30%, #5ec8d8 32% 55%, #b83a6a 58% 70%, transparent 72%); opacity:0; }
+  .eye .lid { position:absolute; left:10%; right:10%; top:48%; height:4px; background:#2d1b1e; border-radius:4px; }
+  .eye.open .iris { opacity:1; } .eye.open .lid { opacity:0; }
+  .eye .count { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font:700 34px Impact; color:var(--red); }
+  .eye.placed-away { visibility:hidden; }
+  .home { width:112px; height:112px; border-radius:50%; border:1.5px dashed rgba(255,255,255,.12); }
+  #slots { display:flex; gap:22px; margin-top:10px; }
+  .slot { width:96px; height:96px; border-radius:50%; border:1.5px dashed rgba(217,185,138,.5); display:flex; align-items:center; justify-content:center; font:700 26px Georgia; color:var(--tan); position:relative; }
+  .slot .mini { position:absolute; inset:6px; border-radius:50%; background:radial-gradient(circle, #111 0 16%, #5ec8d8 18% 34%, #b83a6a 36% 44%, #1a1012 46%); cursor:grab; }
+  .dragging { position:fixed; pointer-events:none; z-index:50; opacity:.85; }
+</style>
+</head>
+<body>
+<main id="stage"><div id="eyes"></div><div id="slots"></div></main>
+<script type="module">
+import { R, pick, shuffle, sha, $, frame, onSubmit, seed } from './common.js';
+const MORSE = { A: '.-', B: '-...', C: '-.-.', D: '-..', E: '.', F: '..-.', G: '--.', H: '....', I: '..', J: '.---', K: '-.-', L: '.-..', M: '--', N: '-.', O: '---', P: '.--.', Q: '--.-', R: '.-.', S: '...', T: '-', U: '..-', V: '...-', W: '.--', X: '-..-', Y: '-.--', Z: '--..' };
+import { params as P } from './common.js';
+const UNIT = Number(P.get('unit')) || (seed >= 10 ? [170, 200, 250][seed % 3] : 220); // seeds ≥ 10: an unfamiliar Morse unit
+// Rule variants. CORPUS rule: order the LOST (who left the story), earliest to latest; the remaining are decoys.
+// Names and page refs below are invented filler -- point them at your own corpus to make the rule real.
+const LOST = ['ASHBY', 'BRENNER', 'CALLOW', 'DUNMORE', 'ELSWORTH', 'FAIRBAIRN'];  // order of departure (p101, 212, 219, 258, 277, 434)
+const LIVING = ['GRANT', 'HOLLIS', 'IVERS', 'KEANE', 'LOWELL', 'MERCER', 'NORTH', 'OAKES'];
+const bookRule = seed % 3 !== 0;
+const K = bookRule ? pick([4, 5]) : 4;
+let answer, decoys, clue;
+if (bookRule) {
+  const start = Math.floor(R() * (LOST.length - K + 1));
+  const chosen = shuffle(LOST.slice()).slice(0, K);
+  answer = LOST.filter(n => chosen.includes(n));                          // keep book order
+  decoys = shuffle(LIVING.slice()).slice(0, pick([2, 3]));
+  clue = `Each eye spells a name. Some of them were lost. Place the lost in order, earliest loss to latest. The others are decoys. Watch again if you miss a blink.`;
+} else {
+  answer = ['ONE', 'TWO', 'THREE', 'FOUR'];
+  decoys = shuffle(['NORTH', 'SOUTH', 'EAST', 'WEST']).slice(0, pick([2, 3, 4]));
+  clue = `Eyes spell numbers in Morse. Find ONE, TWO, THREE, FOUR. Place those eyes in that order. Other eyes are decoys.`;
+}
+const words = shuffle([...answer, ...decoys]);
+frame({ code: 'R3 · G7', title: 'The Lost Lineup', clue, hint: 'HOVER AN EYE TO WATCH IT · DRAG AND DROP TO ORDER' });
+$('progress').textContent = `0 OF ${K} PLACED`;
+const cols = words.length > 6 ? 4 : 3;
+$('eyes').style.gridTemplateColumns = `repeat(${cols}, 112px)`;
+$('eyes').innerHTML = words.map((w, i) => `<div class="home" data-home="${i}"><div class="eye" data-i="${i}"><div class="iris"></div><div class="lid"></div><div class="count"></div></div></div>`).join('');
+$('slots').innerHTML = Array.from({ length: K }, (_, i) => `<div class="slot" data-s="${i}">${['I', 'II', 'III', 'IV', 'V'][i]}</div>`).join('');
+const slots = Array(K).fill(null);
+
+// hover → countdown → one playback of the message (open eye = signal)
+const timers = {};
+function play(i) {
+  const el = document.querySelector(`.eye[data-i="${i}"]`); stop(i);
+  const seq = [];
+  let t = 0; const at = (ms, fn) => seq.push(setTimeout(fn, ms));
+  ['3', '2', '1'].forEach((c, k) => at(k * 500, () => el.querySelector('.count').textContent = c));
+  t = 1500; at(t, () => el.querySelector('.count').textContent = '');
+  t += 400;
+  words[i].split('').forEach((ch, li) => {
+    if (li) t += 3 * UNIT;
+    MORSE[ch].split('').forEach((sym, si) => {
+      if (si) t += UNIT;
+      const d = (sym === '-' ? 3 : 1) * UNIT;
+      at(t, () => el.classList.add('open')); at(t + d, () => el.classList.remove('open'));
+      t += d;
+    });
+  });
+  timers[i] = seq;
+}
+function stop(i) { (timers[i] || []).forEach(clearTimeout); const el = document.querySelector(`.eye[data-i="${i}"]`); el.classList.remove('open'); el.querySelector('.count').textContent = ''; }
+document.querySelectorAll('.eye').forEach(el => { const i = +el.dataset.i; el.onmouseenter = () => play(i); el.onmouseleave = () => stop(i); });
+
+// drag eyes (or placed minis) onto slots; drop elsewhere = send home
+let drag = null;
+document.addEventListener('pointerdown', e => {
+  const eye = e.target.closest('.eye'), mini = e.target.closest('.mini');
+  if (!eye && !mini) return;
+  const i = eye ? +eye.dataset.i : +mini.dataset.i;
+  const ghost = document.createElement('div'); ghost.className = 'slot dragging'; ghost.innerHTML = '<div class="mini"></div>';
+  document.body.appendChild(ghost);
+  drag = { i, ghost, from: mini ? +mini.parentElement.dataset.s : null };
+  move(e); e.preventDefault();
+});
+const move = e => { if (drag) { drag.ghost.style.left = e.clientX - 48 + 'px'; drag.ghost.style.top = e.clientY - 48 + 'px'; } };
+document.addEventListener('pointermove', move);
+document.addEventListener('pointerup', e => {
+  if (!drag) return;
+  drag.ghost.remove();
+  const slotEl = document.elementsFromPoint(e.clientX, e.clientY).find(x => x.classList?.contains('slot') && !x.classList.contains('dragging'));
+  const cur = slots.indexOf(drag.i);
+  if (slotEl) {
+    const s = +slotEl.dataset.s;
+    if (cur >= 0) slots[cur] = slots[s]; // swap if moving between slots
+    slots[s] = drag.i;
+  } else if (cur >= 0) slots[cur] = null;
+  drag = null; render();
+});
+function render() {
+  document.querySelectorAll('.slot:not(.dragging)').forEach((el, s) => {
+    el.innerHTML = ['I', 'II', 'III', 'IV', 'V'][s] + (slots[s] !== null ? `<div class="mini" data-i="${slots[s]}"></div>` : '');
+  });
+  document.querySelectorAll('.eye').forEach(el => el.classList.toggle('placed-away', slots.includes(+el.dataset.i)));
+  $('progress').textContent = `${slots.filter(x => x !== null).length} OF ${K} PLACED`;
+}
+const target = await sha(answer.join(','));
+onSubmit(() => slots.every(x => x !== null), async () => {
+  const got = slots.map(i => words[i]);
+  const ok = await sha(got.join(',')) === target;
+  // per-slot credit without revealing which words belong: compare hashes of each prefix
+  let right = 0; for (let k = 1; k <= K; k++) if (await sha(got.slice(0, k).join(',')) === await sha(answer.slice(0, k).join(','))) right = k;
+  return { pct: ok ? 100 : Math.round(100 * right / K), notes: [ok ? 'All places correct.' : `${right} of ${K} places correct from the start.`] };
+});
+</script>
+</body>
+</html>

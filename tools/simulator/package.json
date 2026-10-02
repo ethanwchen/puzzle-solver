@@ -1,0 +1,6 @@
+{
+  "name": "puzzle-solver-simulator",
+  "private": true,
+  "description": "Local practice puzzles + scripted player for testing the Sidekick",
+  "dependencies": { "playwright-core": "^1.56.0" }
+}

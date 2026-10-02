@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<title>Sidekick outline</title>
+<style>
+  /* Click-through outline around the target on screen, plus an optional small tag (for "②"-style item labels). */
+  html, body { margin:0; height:100%; background:transparent; overflow:hidden; font:12px/1.2 -apple-system, BlinkMacSystemFont, sans-serif; pointer-events:none; }
+  #box { position:absolute; inset:3px; border:2px dashed #22c55e; border-radius:6px; box-shadow:0 0 0 3px rgba(34,197,94,.18); }
+  .label #box { border:1.5px solid #ec4899; box-shadow:none; }
+  .step #box { border:2px solid #38bdf8; box-shadow:0 0 0 3px rgba(56,189,248,.2); animation:glow 1.4s infinite; }
+  .step #tag { background:#38bdf8; color:#04202e; font-size:13px; border-radius:0 0 7px 0; }
+  @keyframes glow { 50% { box-shadow:0 0 0 6px rgba(56,189,248,.05); } }
+  #tag { position:absolute; left:3px; top:-1px; background:#ec4899; color:#fff; font-weight:700; border-radius:0 0 6px 0; padding:2px 7px; display:none; }
+  .label #tag { display:block; }
+  #n { position:absolute; right:3px; top:3px; background:#22c55e; color:#06240f; font-weight:700; border-radius:0 5px 0 6px; padding:1px 6px; display:none; }
+  .n #n { display:block; }
+</style>
+</head>
+<body>
+<div id="box"></div><div id="tag"></div><div id="n"></div>
+<script>
+const q = JSON.parse(decodeURIComponent(location.hash.slice(1)));
+document.getElementById('tag').textContent = q.tag || '';
+document.getElementById('n').textContent = q.n || '';
+document.body.className = (q.step ? 'step ' : q.tag ? 'label ' : '') + (q.n ? 'n' : '');
+if (q.step) {
+  const t = document.getElementById('tag'), b = document.getElementById('box');
+  t.style.display = 'block';
+  if (q.pad) { // badge sits in the margin, just outside the target's top-left corner
+    b.style.inset = `${q.pad - 3}px 1px 1px ${q.pad - 3}px`;
+    Object.assign(t.style, { left: '0px', top: '0px', borderRadius: '7px', padding: '1px 6px' });
+  }
+}
+</script>
+</body>
+</html>
